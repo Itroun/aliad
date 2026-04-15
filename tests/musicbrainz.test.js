@@ -1,0 +1,69 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { lookup, mapDetails } from '../src/providers/musicbrainz.js';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const fixture = (name) => JSON.parse(readFileSync(join(here, 'fixtures', name), 'utf8'));
+
+function fakeFetch(routes) {
+  return async (url) => {
+    for (const [match, payload] of routes) {
+      if (url.includes(match)) {
+        return { ok: true, status: 200, json: async () => payload };
+      }
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  };
+}
+
+describe('musicbrainz.lookup', () => {
+  it('maps a real search + details response', async () => {
+    const search = fixture('musicbrainz-search-infected-mushroom.json');
+    const details = fixture('musicbrainz-details-infected-mushroom.json');
+    const fetchFn = fakeFetch([
+      ['/artist?query=', search],
+      [`/artist/${search.artists[0].id}`, details],
+    ]);
+
+    const result = await lookup('Infected Mushroom', { fetchFn });
+
+    expect(result.members.map((m) => m.name).sort()).toEqual([
+      'Amit Duvdevani',
+      'Erez Aizen',
+    ]);
+    expect(result.groups.map((g) => g.name).sort()).toEqual([
+      'Fly Agaric',
+      'Psy Trance Mafia',
+    ]);
+    expect(result.relatedProjects.map((r) => r.name)).toEqual(['Infected Deedrah']);
+    expect(result.aliases.length).toBeGreaterThan(0);
+  });
+
+  it('returns the empty shape when search finds no artist', async () => {
+    const fetchFn = fakeFetch([['/artist?query=', { count: 0, artists: [] }]]);
+    const result = await lookup('Nonexistent Artist 12345', { fetchFn });
+    expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
+  });
+
+  it('propagates network errors', async () => {
+    const fetchFn = async () => { throw new Error('offline'); };
+    await expect(lookup('whatever', { fetchFn })).rejects.toThrow('offline');
+  });
+
+  it('throws on non-ok HTTP status', async () => {
+    const fetchFn = async () => ({ ok: false, status: 503, json: async () => ({}) });
+    await expect(lookup('whatever', { fetchFn })).rejects.toThrow(/503/);
+  });
+});
+
+describe('musicbrainz.mapDetails', () => {
+  it('filters out backward supporting-musician relations', () => {
+    const details = fixture('musicbrainz-details-infected-mushroom.json');
+    const result = mapDetails(details);
+    const names = result.relatedProjects.map((r) => r.name);
+    expect(names).not.toContain('Jonathan Davis');
+    expect(names).not.toContain('Perry Farrell');
+  });
+});

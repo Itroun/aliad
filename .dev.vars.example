@@ -1,0 +1,4 @@
+# Copy this file to .dev.vars and fill in your Discogs personal access token.
+# Used by `wrangler pages dev` to populate env.DISCOGS_TOKEN in the proxy function.
+# Generate a token at: https://www.discogs.com/settings/developers
+DISCOGS_TOKEN=

@@ -1,0 +1,12 @@
+{
+  "_note": "synthetic fixture based on Discogs API docs; replace with real capture once a token is available",
+  "pagination": { "page": 1, "pages": 1, "per_page": 50, "items": 1 },
+  "results": [
+    {
+      "id": 4995,
+      "type": "artist",
+      "title": "Infected Mushroom",
+      "resource_url": "https://api.discogs.com/artists/4995"
+    }
+  ]
+}

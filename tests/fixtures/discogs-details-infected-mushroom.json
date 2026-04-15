@@ -1,0 +1,17 @@
+{
+  "_note": "synthetic fixture based on Discogs API docs; replace with real capture once a token is available",
+  "id": 4995,
+  "name": "Infected Mushroom",
+  "resource_url": "https://api.discogs.com/artists/4995",
+  "uri": "https://www.discogs.com/artist/4995",
+  "aliases": [
+    { "id": 100001, "name": "I.M.", "resource_url": "https://api.discogs.com/artists/100001" }
+  ],
+  "members": [
+    { "id": 200001, "name": "Erez Eisen", "active": true, "resource_url": "https://api.discogs.com/artists/200001" },
+    { "id": 200002, "name": "Amit Duvdevani", "active": true, "resource_url": "https://api.discogs.com/artists/200002" }
+  ],
+  "groups": [
+    { "id": 300001, "name": "Fly Agaric", "active": false, "resource_url": "https://api.discogs.com/artists/300001" }
+  ]
+}

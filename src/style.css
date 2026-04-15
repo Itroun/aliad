@@ -1,0 +1,86 @@
+:root {
+  --fg: #1a1a1a;
+  --muted: #666;
+  --bg: #fafafa;
+  --card-bg: #fff;
+  --border: #e3e3e3;
+  --accent: #4a3aff;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+#app {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.75rem;
+}
+
+.tagline {
+  margin: 0 0 2rem;
+  color: var(--muted);
+}
+
+.lineup-form label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.lineup-form textarea {
+  width: 100%;
+  font: inherit;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--card-bg);
+  resize: vertical;
+}
+
+.lineup-form button {
+  margin-top: 0.75rem;
+  padding: 0.6rem 1.25rem;
+  font: inherit;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.lineup-form button:hover { filter: brightness(1.1); }
+
+.results { margin-top: 2rem; display: grid; gap: 1rem; }
+
+.artist-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+}
+
+.artist-card h2 { margin: 0 0 0.25rem; font-size: 1.2rem; }
+.artist-status { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.85rem; }
+
+.artist-body section { margin-top: 0.75rem; }
+.artist-body h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.artist-body ul { margin: 0; padding-left: 1.25rem; }
+.artist-empty { margin: 0; color: var(--muted); font-style: italic; }
