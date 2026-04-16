@@ -6,3 +6,4 @@ dist
 .wrangler
 .DS_Store
 *.log
+CLAUDE.md
