@@ -61,6 +61,87 @@ describe('lookupAll', () => {
     expect(calls.sort()).toEqual(['Bar', 'Foo']);
   });
 
+  it('follows aliases and attributes results with via', async () => {
+    const p = stubProvider('mb', {
+      Dickster: {
+        aliases: [{ name: 'Dick Trevor' }],
+        groups: [],
+        members: [],
+        relatedProjects: [],
+      },
+      'Dick Trevor': {
+        aliases: [{ name: 'Dickster' }],
+        groups: [{ name: 'Green Nuns of the Revolution' }],
+        members: [],
+        relatedProjects: [],
+      },
+    });
+
+    const doneEvents = [];
+    const results = await lookupAll(['Dickster'], [p], {
+      onArtistDone: (artist, merged) => doneEvents.push({ artist, merged }),
+    });
+
+    const groups = results[0].merged.groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0].name).toBe('Green Nuns of the Revolution');
+    expect(groups[0].via).toBe('Dick Trevor');
+    expect(doneEvents.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('avoids cycles when following aliases', async () => {
+    const lookups = [];
+    const p = {
+      name: 'p',
+      async lookup(name) {
+        lookups.push(name);
+        if (name === 'A') return { aliases: [{ name: 'B' }], groups: [], members: [], relatedProjects: [] };
+        if (name === 'B') return { aliases: [{ name: 'A' }], groups: [{ name: 'SomeGroup' }], members: [], relatedProjects: [] };
+        return { aliases: [], groups: [], members: [], relatedProjects: [] };
+      },
+    };
+
+    await lookupAll(['A'], [p]);
+    expect(lookups).toEqual(['A', 'B']);
+  });
+
+  it('follows transitive aliases', async () => {
+    const p = stubProvider('p', {
+      A: { aliases: [{ name: 'B' }], groups: [], members: [], relatedProjects: [] },
+      B: { aliases: [{ name: 'C' }], groups: [], members: [], relatedProjects: [] },
+      C: { aliases: [], groups: [{ name: 'Deep Group' }], members: [], relatedProjects: [] },
+    });
+
+    const results = await lookupAll(['A'], [p]);
+    const groups = results[0].merged.groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0].name).toBe('Deep Group');
+    expect(groups[0].via).toBe('C');
+  });
+
+  it('prefers direct entries over via-attributed ones', async () => {
+    const p = stubProvider('p', {
+      A: {
+        aliases: [{ name: 'B' }],
+        groups: [{ name: 'SharedGroup' }],
+        members: [],
+        relatedProjects: [],
+      },
+      B: {
+        aliases: [],
+        groups: [{ name: 'SharedGroup' }],
+        members: [],
+        relatedProjects: [],
+      },
+    });
+
+    const results = await lookupAll(['A'], [p]);
+    const groups = results[0].merged.groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0].name).toBe('SharedGroup');
+    expect(groups[0].via).toBeUndefined();
+  });
+
   it('reports provider errors without failing the artist', async () => {
     const failing = stubProvider('bad', { Foo: new Error('rate limited') });
     const working = stubProvider('good', { Foo: { aliases: [{ name: 'X' }], groups: [], members: [], relatedProjects: [] } });

@@ -89,7 +89,9 @@ function renderCard(artistName) {
       const ul = document.createElement('ul');
       for (const entry of entries) {
         const li = document.createElement('li');
-        li.textContent = entry.name;
+        li.textContent = entry.via
+          ? `${entry.name} (as ${entry.via})`
+          : entry.name;
         ul.append(li);
       }
       section.append(h3, ul);

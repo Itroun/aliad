@@ -54,4 +54,29 @@ describe('discogs.mapDetails', () => {
     expect(result.members[0].sourceUrl).toBe('https://www.discogs.com/artist/200001');
     expect(result.groups[0].sourceUrl).toBe('https://www.discogs.com/artist/300001');
   });
+
+  it('strips Discogs disambiguation suffixes from names', () => {
+    const details = {
+      id: 1,
+      aliases: [{ id: 2, name: 'Muttley (3)' }],
+      groups: [{ id: 3, name: 'Juice (13)' }],
+      members: [{ id: 4, name: 'Trickster (2)' }],
+    };
+    const result = mapDetails(details);
+    expect(result.aliases[0].name).toBe('Muttley');
+    expect(result.groups[0].name).toBe('Juice');
+    expect(result.members[0].name).toBe('Trickster');
+  });
+
+  it('preserves names with non-disambiguation parentheses', () => {
+    const details = {
+      id: 1,
+      aliases: [{ id: 2, name: 'Sunn O)))' }],
+      groups: [],
+      members: [{ id: 3, name: 'Earth (band)' }],
+    };
+    const result = mapDetails(details);
+    expect(result.aliases[0].name).toBe('Sunn O)))');
+    expect(result.members[0].name).toBe('Earth (band)');
+  });
 });

@@ -30,6 +30,10 @@ async function getJson(url, { signal, fetchFn }) {
   return res.json();
 }
 
+function stripDisambiguation(name) {
+  return name.replace(/ \(\d+\)$/, '');
+}
+
 export function mapDetails(details) {
   const result = emptyResult();
   const sourceUrl = details?.id ? `https://www.discogs.com/artist/${details.id}` : undefined;
@@ -37,7 +41,7 @@ export function mapDetails(details) {
   for (const alias of details?.aliases ?? []) {
     if (!alias?.name) continue;
     result.aliases.push({
-      name: alias.name,
+      name: stripDisambiguation(alias.name),
       sourceUrl: alias.id ? `https://www.discogs.com/artist/${alias.id}` : sourceUrl,
     });
   }
@@ -45,7 +49,7 @@ export function mapDetails(details) {
   for (const group of details?.groups ?? []) {
     if (!group?.name) continue;
     result.groups.push({
-      name: group.name,
+      name: stripDisambiguation(group.name),
       sourceUrl: group.id ? `https://www.discogs.com/artist/${group.id}` : sourceUrl,
     });
   }
@@ -53,7 +57,7 @@ export function mapDetails(details) {
   for (const member of details?.members ?? []) {
     if (!member?.name) continue;
     result.members.push({
-      name: member.name,
+      name: stripDisambiguation(member.name),
       sourceUrl: member.id ? `https://www.discogs.com/artist/${member.id}` : sourceUrl,
     });
   }
