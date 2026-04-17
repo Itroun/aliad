@@ -49,6 +49,26 @@ h1 {
   resize: vertical;
 }
 
+.lineup-form .url-label {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.lineup-form .url-input {
+  width: 100%;
+  font: inherit;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--card-bg);
+}
+
+.extraction-status {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-style: italic;
+}
+
 .lineup-form button {
   margin-top: 0.75rem;
   padding: 0.6rem 1.25rem;
@@ -84,3 +104,26 @@ h1 {
 }
 .artist-body ul { margin: 0; padding-left: 1.25rem; }
 .artist-empty { margin: 0; color: var(--muted); font-style: italic; }
+
+.paste-banner {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  background: #eef4ff;
+  border: 1px solid #c4d8f0;
+  border-radius: 0.4rem;
+  font-size: 0.85rem;
+  color: #2a5088;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.paste-banner-dismiss {
+  background: none;
+  border: none;
+  color: #2a5088;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
