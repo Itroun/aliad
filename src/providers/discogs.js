@@ -1,31 +1,38 @@
 import { emptyResult } from './provider.js';
+import { fetchWithRetry } from '../core/retry.js';
 
 export const name = 'discogs';
-export const minIntervalMs = 1050;
+export const minIntervalMs = 1500;
 
 const PROXY = '/api/discogs';
 
-export async function lookup(artistName, { signal, fetchFn = fetch } = {}) {
-  const match = await search(artistName, { signal, fetchFn });
+export async function lookup(artistName, { signal, fetchFn = fetch, sleep } = {}) {
+  const ctx = { signal, fetchFn, sleep };
+  const match = await search(artistName, ctx);
   if (!match) return emptyResult();
-  const details = await fetchDetails(match.id, { signal, fetchFn });
+  const details = await fetchDetails(match.id, ctx);
   return mapDetails(details);
 }
 
-async function search(artistName, { signal, fetchFn }) {
+async function search(artistName, ctx) {
   const url = `${PROXY}/database/search?q=${encodeURIComponent(artistName)}&type=artist`;
-  const data = await getJson(url, { signal, fetchFn });
+  const data = await getJson(url, ctx);
   const first = data?.results?.[0];
   return first && first.id ? first : null;
 }
 
-async function fetchDetails(id, { signal, fetchFn }) {
+async function fetchDetails(id, ctx) {
   const url = `${PROXY}/artists/${encodeURIComponent(id)}`;
-  return getJson(url, { signal, fetchFn });
+  return getJson(url, ctx);
 }
 
-async function getJson(url, { signal, fetchFn }) {
-  const res = await fetchFn(url, { signal, headers: { Accept: 'application/json' } });
+async function getJson(url, { signal, fetchFn, sleep }) {
+  const res = await fetchWithRetry(
+    fetchFn,
+    url,
+    { signal, headers: { Accept: 'application/json' } },
+    { sleep },
+  );
   if (!res.ok) throw new Error(`Discogs ${res.status} for ${url}`);
   return res.json();
 }

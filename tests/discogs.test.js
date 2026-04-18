@@ -43,7 +43,7 @@ describe('discogs.lookup', () => {
 
   it('throws on non-ok HTTP status', async () => {
     const fetchFn = async () => ({ ok: false, status: 429, json: async () => ({}) });
-    await expect(lookup('whatever', { fetchFn })).rejects.toThrow(/429/);
+    await expect(lookup('whatever', { fetchFn, sleep: () => {} })).rejects.toThrow(/429/);
   });
 });
 

@@ -1,36 +1,39 @@
 import { emptyResult } from './provider.js';
+import { fetchWithRetry } from '../core/retry.js';
 
 export const name = 'musicbrainz';
-export const minIntervalMs = 1100;
+export const minIntervalMs = 1200;
 
 const BASE = 'https://musicbrainz.org/ws/2';
-const USER_AGENT = 'aka/0.1 (https://alsoknownas.music)';
 
-export async function lookup(artistName, { signal, fetchFn = fetch } = {}) {
-  const match = await search(artistName, { signal, fetchFn });
+export async function lookup(artistName, { signal, fetchFn = fetch, sleep } = {}) {
+  const ctx = { signal, fetchFn, sleep };
+  const match = await search(artistName, ctx);
   if (!match) return emptyResult();
-  const details = await fetchDetails(match.id, { signal, fetchFn });
+  const details = await fetchDetails(match.id, ctx);
   return mapDetails(details);
 }
 
-async function search(artistName, { signal, fetchFn }) {
+async function search(artistName, ctx) {
   const query = encodeURIComponent(`artist:"${artistName}"`);
   const url = `${BASE}/artist?query=${query}&fmt=json&limit=5`;
-  const data = await getJson(url, { signal, fetchFn });
+  const data = await getJson(url, ctx);
   const first = data?.artists?.[0];
   return first && first.id ? first : null;
 }
 
-async function fetchDetails(mbid, { signal, fetchFn }) {
+async function fetchDetails(mbid, ctx) {
   const url = `${BASE}/artist/${encodeURIComponent(mbid)}?inc=aliases+artist-rels&fmt=json`;
-  return getJson(url, { signal, fetchFn });
+  return getJson(url, ctx);
 }
 
-async function getJson(url, { signal, fetchFn }) {
-  const res = await fetchFn(url, {
-    signal,
-    headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
-  });
+async function getJson(url, { signal, fetchFn, sleep }) {
+  const res = await fetchWithRetry(
+    fetchFn,
+    url,
+    { signal, headers: { Accept: 'application/json' } },
+    { sleep },
+  );
   if (!res.ok) throw new Error(`MusicBrainz ${res.status} for ${url}`);
   return res.json();
 }

@@ -30,10 +30,11 @@ export async function onRequest(context) {
     },
   });
 
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers: {
-      'Content-Type': upstream.headers.get('Content-Type') ?? 'application/json',
-    },
-  });
+  const headers = {
+    'Content-Type': upstream.headers.get('Content-Type') ?? 'application/json',
+  };
+  const retryAfter = upstream.headers.get('Retry-After');
+  if (retryAfter) headers['Retry-After'] = retryAfter;
+
+  return new Response(upstream.body, { status: upstream.status, headers });
 }
