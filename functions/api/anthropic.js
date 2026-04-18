@@ -1,6 +1,6 @@
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
-const ALLOWED_MODELS = ['claude-haiku-4-5-20251001', 'claude-sonnet-4-20250514'];
+const ALLOWED_MODELS = ['claude-haiku-4-5', 'claude-sonnet-4-6'];
 const MAX_TOKENS_CAP = 4096;
 const RATE_LIMIT = 20;
 const RATE_WINDOW_MS = 60_000;

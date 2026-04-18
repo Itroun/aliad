@@ -26,17 +26,6 @@ export function createInput({ onSubmit, onCancel }) {
   textarea.rows = 10;
   textarea.placeholder = 'Infected Mushroom\nShpongle\nAphex Twin';
 
-  const banner = document.createElement('p');
-  banner.className = 'paste-banner';
-  banner.hidden = true;
-  banner.textContent = 'Rich content detected \u2014 webpage formatting will be used for better extraction.';
-
-  const dismissBtn = document.createElement('button');
-  dismissBtn.type = 'button';
-  dismissBtn.className = 'paste-banner-dismiss';
-  dismissBtn.textContent = '\u00d7';
-  banner.append(dismissBtn);
-
   const urlLabel = document.createElement('label');
   urlLabel.htmlFor = 'lineup-url';
   urlLabel.textContent = 'Or paste a lineup URL:';
@@ -53,37 +42,36 @@ export function createInput({ onSubmit, onCancel }) {
   button.type = 'submit';
   button.textContent = 'Look up';
 
-  form.append(label, textarea, banner, urlLabel, urlInput, button);
+  form.append(label, textarea, urlLabel, urlInput, button);
 
   let pastedHTML = null;
-
-  function clearHTML() {
-    pastedHTML = null;
-    banner.hidden = true;
-  }
-
+  let pasteFormat = null;
   let justPasted = false;
+
+  function clearPasteState() {
+    pastedHTML = null;
+    pasteFormat = null;
+  }
 
   textarea.addEventListener('paste', (event) => {
     onCancel?.();
     const html = event.clipboardData?.getData('text/html');
     if (html && html.includes('<')) {
       pastedHTML = html;
-      banner.hidden = false;
-      justPasted = true;
+      pasteFormat = 'html';
     } else {
-      clearHTML();
+      pastedHTML = null;
+      pasteFormat = 'plain-text';
     }
+    justPasted = true;
   });
-
-  dismissBtn.addEventListener('click', clearHTML);
 
   textarea.addEventListener('input', () => {
     onCancel?.();
     if (justPasted) {
       justPasted = false;
     } else {
-      clearHTML();
+      clearPasteState();
     }
     if (textarea.value.trim()) urlInput.value = '';
   });
@@ -91,7 +79,7 @@ export function createInput({ onSubmit, onCancel }) {
     onCancel?.();
     if (urlInput.value.trim()) {
       textarea.value = '';
-      clearHTML();
+      clearPasteState();
     }
   });
 
@@ -102,9 +90,9 @@ export function createInput({ onSubmit, onCancel }) {
     if (url) {
       onSubmit({ type: 'url', value: url });
     } else if (text && pastedHTML) {
-      onSubmit({ type: 'paste-html', value: text, html: pastedHTML });
+      onSubmit({ type: 'paste-html', value: text, html: pastedHTML, pasteFormat: 'html' });
     } else if (text) {
-      onSubmit({ type: 'text', value: text });
+      onSubmit({ type: 'text', value: text, pasteFormat });
     }
   });
 

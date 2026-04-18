@@ -1,7 +1,7 @@
 import { parseLineup } from '../ui/input.js';
 
-const HAIKU = 'claude-haiku-4-5-20251001';
-const SONNET = 'claude-sonnet-4-20250514';
+const HAIKU = 'claude-haiku-4-5';
+const SONNET = 'claude-sonnet-4-6';
 
 const SYSTEM_PROMPT_TEXT = `You extract artist and performer names from text related to music festivals or events.
 
@@ -49,7 +49,7 @@ export function detectInputType(text) {
   return 'clean';
 }
 
-export async function extractArtists(content, { type, signal, fetchFn = fetch }) {
+export async function extractArtists(content, { type, signal, fetchFn = fetch, onCall } = {}) {
   if (type === 'clean-text') {
     return { artists: parseLineup(content), discoveredAliases: [] };
   }
@@ -59,25 +59,31 @@ export async function extractArtists(content, { type, signal, fetchFn = fetch })
   }
 
   const systemPrompt = type === 'html' ? SYSTEM_PROMPT_HTML : SYSTEM_PROMPT_TEXT;
+  const trimmed = content.trim();
+  const messages = [{ role: 'user', content: trimmed }];
 
-  const messages = [{ role: 'user', content: content.trim() }];
+  let result = await timedCall(HAIKU, systemPrompt, messages, { signal, fetchFn }, onCall, trimmed.length);
 
-  let result = await callLLM(
-    { system: systemPrompt, messages, model: HAIKU },
-    { signal, fetchFn },
-  );
-
-  if (!result.artists?.length && content.trim().length > 20) {
-    result = await callLLM(
-      { system: systemPrompt, messages, model: SONNET },
-      { signal, fetchFn },
-    );
+  if (!result.artists?.length && trimmed.length > 20) {
+    result = await timedCall(SONNET, systemPrompt, messages, { signal, fetchFn }, onCall, trimmed.length);
   }
 
   return {
     artists: Array.isArray(result.artists) ? result.artists : [],
     discoveredAliases: Array.isArray(result.discoveredAliases) ? result.discoveredAliases : [],
   };
+}
+
+async function timedCall(model, system, messages, { signal, fetchFn }, onCall, inputChars) {
+  const start = Date.now();
+  const result = await callLLM({ system, messages, model }, { signal, fetchFn });
+  onCall?.({
+    model,
+    inputChars,
+    outputArtists: Array.isArray(result?.artists) ? result.artists.length : 0,
+    durationMs: Date.now() - start,
+  });
+  return result;
 }
 
 export async function callLLM({ system, messages, model }, { signal, fetchFn = fetch }) {

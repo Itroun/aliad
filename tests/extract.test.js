@@ -105,7 +105,7 @@ describe('extractArtists', () => {
       return new Response(JSON.stringify(sonnetResponse));
     };
     const result = await extractArtists('some messy content here', { type: 'messy-text', fetchFn });
-    expect(calls).toEqual(['claude-haiku-4-5-20251001', 'claude-sonnet-4-20250514']);
+    expect(calls).toEqual(['claude-haiku-4-5', 'claude-sonnet-4-6']);
     expect(result.artists).toEqual(['Found']);
   });
 });

@@ -1,6 +1,7 @@
 import './style.css';
 import { createInput } from './ui/input.js';
 import { createResults } from './ui/results.js';
+import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
 import { detectInputType, extractArtists } from './core/extract.js';
 import { createExtractionProvider } from './core/extractionProvider.js';
@@ -27,6 +28,8 @@ const results = createResults(resultsEl);
 const statusEl = document.createElement('p');
 statusEl.className = 'extraction-status';
 
+const devProbe = createDevProbe();
+
 let activeController = null;
 
 function cancelActive() {
@@ -45,6 +48,8 @@ const form = createInput({
     const signal = activeController.signal;
 
     results.clear();
+    devProbe.reset();
+    if (input.pasteFormat) devProbe.note(`paste format: ${input.pasteFormat}`);
 
     try {
       const { artists, discoveredAliases } = await resolveInput(input, signal);
@@ -80,18 +85,31 @@ const form = createInput({
   },
 });
 
-app.append(header, form, statusEl, resultsEl);
+app.append(header, form, statusEl);
+if (devProbe.el) app.append(devProbe.el);
+app.append(resultsEl);
+
+function extract(content, type, signal) {
+  return extractArtists(content, {
+    type,
+    signal,
+    onCall: ({ model, inputChars, outputArtists, durationMs }) => {
+      devProbe.note(
+        `extract \u00b7 ${model} \u00b7 in=${inputChars}ch \u00b7 out=${outputArtists} artists \u00b7 ${durationMs}ms`,
+      );
+    },
+  });
+}
 
 async function resolveInput(input, signal) {
   if (input.type === 'url') {
     statusEl.textContent = 'Fetching page\u2026';
-    const html = await fetchPage(input.value, signal);
-    const cleaned = cleanHTML(html);
-    if (cleaned.trim().length < 80) {
-      throw new Error('Could not read useful content from that page (it may require a browser login or have bot protection). Try copying the text and pasting it instead.');
-    }
+    const { kind, body } = await fetchWithFallbacks(input.value, {
+      signal,
+      onAttempt: devProbe.onAttempt,
+    });
     statusEl.textContent = 'Extracting artist names\u2026';
-    return extractArtists(cleaned, { type: 'html', signal });
+    return extract(body, kind === 'html' ? 'html' : 'messy-text', signal);
   }
 
   if (input.type === 'paste-html') {
@@ -100,7 +118,7 @@ async function resolveInput(input, signal) {
       return resolveText(input.value, signal);
     }
     statusEl.textContent = 'Extracting artist names from pasted content\u2026';
-    return extractArtists(cleaned, { type: 'html', signal });
+    return extract(cleaned, 'html', signal);
   }
 
   return resolveText(input.value, signal);
@@ -109,19 +127,71 @@ async function resolveInput(input, signal) {
 function resolveText(text, signal) {
   const inputType = detectInputType(text);
   if (inputType === 'clean') {
-    return extractArtists(text, { type: 'clean-text', signal });
+    return extract(text, 'clean-text', signal);
   }
   statusEl.textContent = 'Extracting artist names\u2026';
-  return extractArtists(text, { type: 'messy-text', signal });
+  return extract(text, 'messy-text', signal);
 }
 
-async function fetchPage(url, signal) {
-  const response = await fetch(`/api/fetch-page?url=${encodeURIComponent(url)}`, { signal });
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Could not fetch that URL: ${text || response.statusText}. Try copying the text from the page and pasting it instead.`);
+const MIN_USEFUL_CHARS = 80;
+
+async function fetchWithFallbacks(url, { signal, onAttempt }) {
+  onAttempt({ path: 'direct', state: 'start' });
+  const direct = await callProxy(url, 'direct', signal);
+  if (direct.ok) {
+    const cleaned = cleanHTML(direct.body);
+    if (cleaned.trim().length >= MIN_USEFUL_CHARS) {
+      onAttempt({ path: 'direct', state: 'ok', attempts: direct.attempts });
+      return { kind: 'html', body: cleaned };
+    }
+    onAttempt({
+      path: 'direct',
+      state: 'fail',
+      attempts: direct.attempts,
+      reason: 'thin content after strip (probably JS-rendered)',
+    });
+  } else {
+    onAttempt({ path: 'direct', state: 'fail', attempts: direct.attempts, reason: direct.reason });
   }
-  return response.text();
+
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+  onAttempt({ path: 'reader', state: 'start' });
+  const reader = await callProxy(url, 'reader', signal);
+  if (reader.ok) {
+    if (reader.body.trim().length >= MIN_USEFUL_CHARS) {
+      onAttempt({ path: 'reader', state: 'ok', attempts: reader.attempts });
+      return { kind: 'text', body: reader.body };
+    }
+    onAttempt({
+      path: 'reader',
+      state: 'fail',
+      attempts: reader.attempts,
+      reason: 'thin reader output',
+    });
+  } else {
+    onAttempt({ path: 'reader', state: 'fail', attempts: reader.attempts, reason: reader.reason });
+  }
+
+  throw new Error('Could not fetch that URL (both direct and reader paths failed or returned too little content). Try copying the text from the page and pasting it instead.');
+}
+
+async function callProxy(url, mode, signal) {
+  const response = await fetch(
+    `/api/fetch-page?mode=${mode}&url=${encodeURIComponent(url)}`,
+    { signal },
+  );
+  let attempts = [];
+  try {
+    attempts = JSON.parse(response.headers.get('X-Fetch-Attempts') || '[]');
+  } catch {
+    attempts = [];
+  }
+  const body = await response.text();
+  if (!response.ok) {
+    return { ok: false, attempts, reason: (body || response.statusText).slice(0, 200) };
+  }
+  return { ok: true, attempts, body };
 }
 
 function cleanHTML(html) {
