@@ -47,6 +47,47 @@ describe('musicbrainz.lookup', () => {
     expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
   });
 
+  it('rejects low-confidence search results', async () => {
+    const lowScore = {
+      count: 1,
+      artists: [{ id: 'abc', name: 'Something Else', score: 70 }],
+    };
+    const fetchFn = fakeFetch([['/artist?query=', lowScore]]);
+    const result = await lookup('Infected Mushroom', { fetchFn });
+    expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
+  });
+
+  it('rejects high-score results whose name and aliases do not match', async () => {
+    const mismatch = {
+      count: 1,
+      artists: [{ id: 'abc', name: 'Totally Different Band', score: 100, aliases: [{ name: 'Another Name' }] }],
+    };
+    const fetchFn = fakeFetch([['/artist?query=', mismatch]]);
+    const result = await lookup('Infected Mushroom', { fetchFn });
+    expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
+  });
+
+  it('accepts a candidate that matches via one of its aliases', async () => {
+    const search = {
+      count: 1,
+      artists: [
+        {
+          id: 'xyz',
+          name: 'Canonical Name',
+          score: 100,
+          aliases: [{ name: 'Infected Mushroom' }],
+        },
+      ],
+    };
+    const details = { id: 'xyz', aliases: [], relations: [] };
+    const fetchFn = fakeFetch([
+      ['/artist?query=', search],
+      ['/artist/xyz', details],
+    ]);
+    const result = await lookup('Infected Mushroom', { fetchFn });
+    expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
+  });
+
   it('propagates network errors', async () => {
     const fetchFn = async () => { throw new Error('offline'); };
     await expect(lookup('whatever', { fetchFn })).rejects.toThrow('offline');

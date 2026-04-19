@@ -5,6 +5,7 @@ import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
 import { detectInputType, extractArtists } from './core/extract.js';
 import { createExtractionProvider } from './core/extractionProvider.js';
+import { cleanHTML } from './core/cleanHTML.js';
 import * as musicbrainz from './providers/musicbrainz.js';
 import * as discogs from './providers/discogs.js';
 
@@ -63,17 +64,25 @@ const form = createInput({
         ? [createExtractionProvider(discoveredAliases), ...providers]
         : providers;
 
-      results.start(artists, activeProviders.map((p) => p.name));
+      results.start(artists);
 
       await lookupAll(artists, activeProviders, {
         signal,
         onProviderResult: (artist, provider, outcome) => {
           if (signal.aborted) return;
-          results.onProviderResult(artist, provider, outcome);
+          devProbe.note(formatProviderNote(artist, provider, outcome));
         },
         onArtistDone: (artist, merged) => {
           if (signal.aborted) return;
           results.onArtistDone(artist, merged);
+        },
+        onArtistComplete: (artist, merged, summary) => {
+          if (signal.aborted) return;
+          results.onArtistComplete(artist, merged, summary);
+        },
+        onBudgetExhausted: (artist, info) => {
+          if (signal.aborted) return;
+          devProbe.note(`${artist} \u00b7 expansion budget hit (${info.skipped} aliases not explored)`);
         },
       });
     } catch (err) {
@@ -194,10 +203,22 @@ async function callProxy(url, mode, signal) {
   return { ok: true, attempts, body };
 }
 
-function cleanHTML(html) {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  for (const tag of doc.querySelectorAll('script, style, noscript, svg, iframe, link, meta')) {
-    tag.remove();
+function formatProviderNote(artist, provider, outcome) {
+  const label = outcome.via ? `${artist} (via ${outcome.via})` : artist;
+  if (!outcome.ok) {
+    const reason = outcome.error?.message || 'failed';
+    return `${label} \u00b7 ${provider} \u00b7 error: ${reason}`;
   }
-  return doc.body?.innerHTML ?? '';
+  const counts = summariseResult(outcome.result);
+  return `${label} \u00b7 ${provider} \u00b7 ${counts || 'no data'}`;
 }
+
+function summariseResult(r) {
+  const parts = [];
+  if (r?.aliases?.length) parts.push(`${r.aliases.length} aliases`);
+  if (r?.groups?.length) parts.push(`${r.groups.length} groups`);
+  if (r?.members?.length) parts.push(`${r.members.length} members`);
+  if (r?.relatedProjects?.length) parts.push(`${r.relatedProjects.length} related`);
+  return parts.join(', ');
+}
+

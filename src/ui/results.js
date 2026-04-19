@@ -21,27 +21,22 @@ export function createResults(container) {
     return card;
   }
 
-  function start(artistNames, providerNames) {
+  function start(artistNames) {
     clear();
-    for (const name of artistNames) {
-      const card = ensureCard(name);
-      for (const providerName of providerNames) {
-        card.setProviderStatus(providerName, 'loading');
-      }
-    }
-  }
-
-  function onProviderResult(artistName, providerName, outcome) {
-    const card = ensureCard(artistName);
-    card.setProviderStatus(providerName, outcome.ok ? 'ok' : 'error', outcome.error);
+    for (const name of artistNames) ensureCard(name);
   }
 
   function onArtistDone(artistName, merged) {
-    const card = ensureCard(artistName);
-    card.renderData(merged);
+    ensureCard(artistName).renderData(merged);
   }
 
-  return { start, onProviderResult, onArtistDone, clear };
+  function onArtistComplete(artistName, merged, summary) {
+    const card = ensureCard(artistName);
+    card.renderData(merged);
+    card.markComplete(summary);
+  }
+
+  return { start, onArtistDone, onArtistComplete, clear };
 }
 
 function renderCard(artistName) {
@@ -54,27 +49,12 @@ function renderCard(artistName) {
 
   const status = document.createElement('p');
   status.className = 'artist-status';
+  status.textContent = 'Searching\u2026';
   root.append(status);
 
   const body = document.createElement('div');
   body.className = 'artist-body';
   root.append(body);
-
-  const providerStatuses = new Map();
-
-  function refreshStatus() {
-    const parts = [...providerStatuses.entries()].map(([provider, state]) => {
-      if (state.status === 'loading') return `${provider}: searching…`;
-      if (state.status === 'error') return `${provider}: error`;
-      return `${provider}: done`;
-    });
-    status.textContent = parts.join(' · ');
-  }
-
-  function setProviderStatus(provider, statusValue, error) {
-    providerStatuses.set(provider, { status: statusValue, error });
-    refreshStatus();
-  }
 
   function renderData(merged) {
     body.replaceChildren();
@@ -105,5 +85,25 @@ function renderCard(artistName) {
     }
   }
 
-  return { root, setProviderStatus, renderData };
+  function markComplete({ queried = [], errored = [] } = {}) {
+    const parts = [];
+    if (queried.length) {
+      parts.push(`Showing results from ${formatList(queried)}`);
+    } else {
+      parts.push('Done');
+    }
+    if (errored.length) {
+      parts.push(`${formatList(errored)} unavailable`);
+    }
+    status.textContent = parts.join(' \u00b7 ');
+    status.classList.toggle('has-error', errored.length > 0);
+  }
+
+  return { root, renderData, markComplete };
+}
+
+function formatList(items) {
+  if (items.length <= 1) return items.join('');
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
 }

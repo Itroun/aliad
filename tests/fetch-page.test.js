@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   fetchWithRetry,
+  isBlockedHost,
   looksLikeChallenge,
 } from '../functions/api/fetch-page.js';
 
@@ -40,6 +41,49 @@ describe('looksLikeChallenge', () => {
   it('returns false for empty input', () => {
     expect(looksLikeChallenge('')).toBe(false);
     expect(looksLikeChallenge(null)).toBe(false);
+  });
+});
+
+describe('isBlockedHost', () => {
+  it('blocks localhost variants', () => {
+    expect(isBlockedHost('localhost')).toBe(true);
+    expect(isBlockedHost('LOCALHOST')).toBe(true);
+    expect(isBlockedHost('something.local')).toBe(true);
+    expect(isBlockedHost('something.internal')).toBe(true);
+  });
+
+  it('blocks cloud metadata hostnames', () => {
+    expect(isBlockedHost('metadata.google.internal')).toBe(true);
+    expect(isBlockedHost('metadata.goog')).toBe(true);
+    expect(isBlockedHost('metadata')).toBe(true);
+  });
+
+  it('blocks all IPv4 literals', () => {
+    expect(isBlockedHost('127.0.0.1')).toBe(true);
+    expect(isBlockedHost('10.0.0.1')).toBe(true);
+    expect(isBlockedHost('192.168.1.1')).toBe(true);
+    expect(isBlockedHost('169.254.169.254')).toBe(true);
+    expect(isBlockedHost('172.16.0.1')).toBe(true);
+    expect(isBlockedHost('8.8.8.8')).toBe(true);
+  });
+
+  it('blocks IPv6 literals with or without brackets', () => {
+    expect(isBlockedHost('::1')).toBe(true);
+    expect(isBlockedHost('[::1]')).toBe(true);
+    expect(isBlockedHost('fe80::1')).toBe(true);
+    expect(isBlockedHost('2001:4860:4860::8888')).toBe(true);
+  });
+
+  it('allows normal public hostnames', () => {
+    expect(isBlockedHost('example.com')).toBe(false);
+    expect(isBlockedHost('boomfestival.org')).toBe(false);
+    expect(isBlockedHost('www.festival.co.uk')).toBe(false);
+  });
+
+  it('blocks empty or missing hostnames', () => {
+    expect(isBlockedHost('')).toBe(true);
+    expect(isBlockedHost(null)).toBe(true);
+    expect(isBlockedHost(undefined)).toBe(true);
   });
 });
 

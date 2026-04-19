@@ -35,7 +35,7 @@ describe('lookupAll', () => {
     const events = [];
     const results = await lookupAll(['Infected Mushroom'], [mb, dg], {
       onProviderResult: (artist, provider, outcome) => {
-        events.push({ artist, provider, ok: outcome.ok });
+        events.push({ artist, provider, ok: outcome.ok, via: outcome.via });
       },
       onArtistDone: (artist, merged) => {
         events.push({ artist, done: true, memberCount: merged.members.length });
@@ -43,7 +43,8 @@ describe('lookupAll', () => {
     });
 
     expect(results).toHaveLength(1);
-    expect(events.filter((e) => e.ok)).toHaveLength(2);
+    const directOk = events.filter((e) => e.ok && !e.via);
+    expect(directOk).toHaveLength(2);
     const done = events.find((e) => e.done);
     expect(done.memberCount).toBe(2);
   });
@@ -140,6 +141,93 @@ describe('lookupAll', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].name).toBe('SharedGroup');
     expect(groups[0].via).toBeUndefined();
+  });
+
+  it('fires onArtistComplete with a queried/errored summary', async () => {
+    const good = stubProvider('mb', {
+      Foo: { aliases: [], groups: [], members: [], relatedProjects: [] },
+    });
+    const bad = stubProvider('dg', { Foo: new Error('boom') });
+
+    const completions = [];
+    await lookupAll(['Foo'], [good, bad], {
+      onArtistComplete: (artist, _merged, summary) => completions.push({ artist, summary }),
+    });
+
+    expect(completions).toHaveLength(1);
+    expect(completions[0].summary.queried).toEqual(['mb']);
+    expect(completions[0].summary.errored).toEqual(['dg']);
+  });
+
+  it('fires onBudgetExhausted when expansion is truncated', async () => {
+    let counter = 0;
+    const p = {
+      name: 'p',
+      async lookup() {
+        counter++;
+        return {
+          aliases: [{ name: `alias-${counter}-a` }, { name: `alias-${counter}-b` }],
+          groups: [],
+          members: [],
+          relatedProjects: [],
+        };
+      },
+    };
+
+    const budgetHits = [];
+    await lookupAll(['Root'], [p], {
+      onBudgetExhausted: (artist, info) => budgetHits.push({ artist, info }),
+    });
+
+    expect(budgetHits).toHaveLength(1);
+    expect(budgetHits[0].artist).toBe('Root');
+    expect(budgetHits[0].info.skipped).toBeGreaterThan(0);
+  });
+
+  it('does not expand aliases typed as Search hint or Legal name', async () => {
+    const lookups = [];
+    const p = {
+      name: 'p',
+      async lookup(name) {
+        lookups.push(name);
+        if (name === 'Root') {
+          return {
+            aliases: [
+              { name: 'Rooty', type: 'Search hint' },
+              { name: 'Richard Rootworth', type: 'Legal name' },
+              { name: 'Root Project', type: 'Artist name' },
+            ],
+            groups: [],
+            members: [],
+            relatedProjects: [],
+          };
+        }
+        return { aliases: [], groups: [{ name: 'Something' }], members: [], relatedProjects: [] };
+      },
+    };
+
+    await lookupAll(['Root'], [p]);
+    expect(lookups).toEqual(['Root', 'Root Project']);
+  });
+
+  it('caps expansion at the per-root lookup budget', async () => {
+    const lookups = [];
+    const p = {
+      name: 'p',
+      async lookup(name) {
+        lookups.push(name);
+        const next = `${name}+`;
+        return {
+          aliases: [{ name: next }],
+          groups: [],
+          members: [],
+          relatedProjects: [],
+        };
+      },
+    };
+
+    await lookupAll(['A'], [p]);
+    expect(lookups.length).toBeLessThanOrEqual(26);
   });
 
   it('reports provider errors without failing the artist', async () => {

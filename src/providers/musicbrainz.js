@@ -1,8 +1,10 @@
 import { emptyResult } from './provider.js';
 import { fetchWithRetry } from '../core/retry.js';
+import { normaliseName } from '../core/merge.js';
 
 export const name = 'musicbrainz';
 export const minIntervalMs = 1200;
+export const MIN_SCORE = 90;
 
 const BASE = 'https://musicbrainz.org/ws/2';
 
@@ -18,8 +20,21 @@ async function search(artistName, ctx) {
   const query = encodeURIComponent(`artist:"${artistName}"`);
   const url = `${BASE}/artist?query=${query}&fmt=json&limit=5`;
   const data = await getJson(url, ctx);
-  const first = data?.artists?.[0];
-  return first && first.id ? first : null;
+  const q = normaliseName(artistName);
+  for (const candidate of data?.artists ?? []) {
+    if (!candidate?.id) continue;
+    if ((candidate.score ?? 0) < MIN_SCORE) break;
+    if (nameMatches(q, candidate)) return candidate;
+  }
+  return null;
+}
+
+function nameMatches(normalisedQuery, candidate) {
+  if (normaliseName(candidate.name) === normalisedQuery) return true;
+  for (const alias of candidate.aliases ?? []) {
+    if (normaliseName(alias?.name) === normalisedQuery) return true;
+  }
+  return false;
 }
 
 async function fetchDetails(mbid, ctx) {

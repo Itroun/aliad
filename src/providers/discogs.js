@@ -1,5 +1,6 @@
 import { emptyResult } from './provider.js';
 import { fetchWithRetry } from '../core/retry.js';
+import { normaliseName } from '../core/merge.js';
 
 export const name = 'discogs';
 export const minIntervalMs = 1500;
@@ -17,8 +18,13 @@ export async function lookup(artistName, { signal, fetchFn = fetch, sleep } = {}
 async function search(artistName, ctx) {
   const url = `${PROXY}/database/search?q=${encodeURIComponent(artistName)}&type=artist`;
   const data = await getJson(url, ctx);
-  const first = data?.results?.[0];
-  return first && first.id ? first : null;
+  const q = normaliseName(artistName);
+  for (const candidate of data?.results ?? []) {
+    if (!candidate?.id) continue;
+    const title = normaliseName(stripDisambiguation(candidate.title ?? ''));
+    if (title === q) return candidate;
+  }
+  return null;
 }
 
 async function fetchDetails(id, ctx) {

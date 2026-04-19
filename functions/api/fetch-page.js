@@ -39,6 +39,23 @@ const CHALLENGE_MARKERS = [
   'Please wait while your request is being verified',
 ];
 
+const BLOCKED_HOSTS = new Set([
+  'localhost',
+  'metadata',
+  'metadata.google.internal',
+  'metadata.goog',
+]);
+
+export function isBlockedHost(hostname) {
+  if (!hostname) return true;
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (BLOCKED_HOSTS.has(host)) return true;
+  if (host.endsWith('.local') || host.endsWith('.internal')) return true;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return true;
+  if (host.includes(':')) return true;
+  return false;
+}
+
 const hits = new Map();
 
 function isRateLimited(ip) {
@@ -199,13 +216,7 @@ export async function onRequest(context) {
     return new Response('Only HTTPS URLs are allowed', { status: 400 });
   }
 
-  const hostname = parsed.hostname;
-  if (
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1' ||
-    hostname === '::1' ||
-    hostname.endsWith('.local')
-  ) {
+  if (isBlockedHost(parsed.hostname)) {
     return new Response('Internal URLs are not allowed', { status: 400 });
   }
 

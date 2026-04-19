@@ -41,6 +41,41 @@ describe('discogs.lookup', () => {
     expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
   });
 
+  it('rejects search results whose title does not match the query', async () => {
+    const fetchFn = fakeFetch([
+      ['/database/search', { results: [{ id: 99, title: 'Completely Different Artist' }] }],
+    ]);
+    const result = await lookup('Infected Mushroom', { fetchFn });
+    expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
+  });
+
+  it('skips non-matching results and takes the first title match', async () => {
+    const search = {
+      results: [
+        { id: 1, title: 'Not Right' },
+        { id: 2, title: 'Infected Mushroom' },
+      ],
+    };
+    const details = { id: 2, aliases: [], groups: [], members: [] };
+    const fetchFn = fakeFetch([
+      ['/database/search', search],
+      ['/artists/2', details],
+    ]);
+    const result = await lookup('Infected Mushroom', { fetchFn });
+    expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
+  });
+
+  it('matches titles that only differ by a Discogs disambiguation suffix', async () => {
+    const search = { results: [{ id: 7, title: 'Muttley (3)' }] };
+    const details = { id: 7, aliases: [], groups: [], members: [] };
+    const fetchFn = fakeFetch([
+      ['/database/search', search],
+      ['/artists/7', details],
+    ]);
+    const result = await lookup('Muttley', { fetchFn });
+    expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
+  });
+
   it('throws on non-ok HTTP status', async () => {
     const fetchFn = async () => ({ ok: false, status: 429, json: async () => ({}) });
     await expect(lookup('whatever', { fetchFn, sleep: () => {} })).rejects.toThrow(/429/);
