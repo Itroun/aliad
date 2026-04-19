@@ -1,3 +1,11 @@
 name = "aka"
 compatibility_date = "2025-01-01"
 pages_build_output_dir = "dist"
+
+# KV namespace for rate limiting and the Anthropic daily request ceiling.
+# Local dev uses a filesystem-backed KV so the `id` here is a placeholder.
+# Before deploying, run `npx wrangler kv:namespace create aka-kv` and replace
+# the id below with the real 32-char namespace id.
+[[kv_namespaces]]
+binding = "KV"
+id = "local-placeholder-replace-before-deploy"

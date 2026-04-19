@@ -90,7 +90,7 @@ describe('musicbrainz.lookup', () => {
 
   it('propagates network errors', async () => {
     const fetchFn = async () => { throw new Error('offline'); };
-    await expect(lookup('whatever', { fetchFn })).rejects.toThrow('offline');
+    await expect(lookup('whatever', { fetchFn, sleep: () => {} })).rejects.toThrow('offline');
   });
 
   it('throws on non-ok HTTP status', async () => {

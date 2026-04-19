@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectInputType, extractArtists, callLLM } from '../src/core/extract.js';
+import { detectInputType, extractArtists, callLLM, looksUnderExtracted } from '../src/core/extract.js';
 import messy from './fixtures/anthropic-extract-messy-text.json';
 import html from './fixtures/anthropic-extract-html.json';
 
@@ -66,6 +66,27 @@ describe('callLLM', () => {
   });
 });
 
+describe('looksUnderExtracted', () => {
+  it('flags empty output on non-trivial input', () => {
+    expect(looksUnderExtracted([], 500)).toBe(true);
+    expect(looksUnderExtracted([], 10)).toBe(false);
+  });
+
+  it('does not flag small inputs with a few artists', () => {
+    expect(looksUnderExtracted(['A', 'B'], 400)).toBe(false);
+    expect(looksUnderExtracted(['A'], 1500)).toBe(false);
+  });
+
+  it('flags large inputs with far fewer artists than expected', () => {
+    expect(looksUnderExtracted(['A', 'B'], 5000)).toBe(true);
+    expect(looksUnderExtracted(['A', 'B', 'C'], 10000)).toBe(true);
+  });
+
+  it('does not flag large inputs with plenty of artists', () => {
+    expect(looksUnderExtracted(Array(30).fill('x'), 10000)).toBe(false);
+  });
+});
+
 describe('extractArtists', () => {
   it('uses parseLineup for clean text', async () => {
     const result = await extractArtists('Infected Mushroom\nShpongle', { type: 'clean-text' });
@@ -92,6 +113,48 @@ describe('extractArtists', () => {
     );
     expect(result.artists).toContain('Dado vs Dino Psaras');
     expect(result.discoveredAliases[0].aliases).toContain('Deedrah');
+  });
+
+  it('falls back to Sonnet when Haiku returns suspiciously few artists for a large input', async () => {
+    const calls = [];
+    const haikuResponse = { content: [{ type: 'text', text: '{"artists":["One","Two"],"discoveredAliases":[]}' }] };
+    const sonnetResponse = {
+      content: [{ type: 'text', text: '{"artists":["A","B","C","D","E","F","G","H"],"discoveredAliases":[]}' }],
+    };
+    const fetchFn = async (_url, opts) => {
+      const body = JSON.parse(opts.body);
+      calls.push(body.model);
+      if (body.model.includes('haiku')) return new Response(JSON.stringify(haikuResponse));
+      return new Response(JSON.stringify(sonnetResponse));
+    };
+    const bigInput = 'x'.repeat(5000);
+    const result = await extractArtists(bigInput, { type: 'html', fetchFn });
+    expect(calls).toEqual(['claude-haiku-4-5', 'claude-sonnet-4-6']);
+    expect(result.artists).toHaveLength(8);
+  });
+
+  it('keeps Haiku result when Sonnet returns fewer artists on fallback', async () => {
+    const haikuResponse = { content: [{ type: 'text', text: '{"artists":["One","Two"],"discoveredAliases":[]}' }] };
+    const sonnetResponse = { content: [{ type: 'text', text: '{"artists":["Only"],"discoveredAliases":[]}' }] };
+    const fetchFn = async (_url, opts) => {
+      const body = JSON.parse(opts.body);
+      if (body.model.includes('haiku')) return new Response(JSON.stringify(haikuResponse));
+      return new Response(JSON.stringify(sonnetResponse));
+    };
+    const bigInput = 'x'.repeat(5000);
+    const result = await extractArtists(bigInput, { type: 'html', fetchFn });
+    expect(result.artists).toEqual(['One', 'Two']);
+  });
+
+  it('does not fall back for small inputs even with few artists', async () => {
+    const calls = [];
+    const haikuResponse = { content: [{ type: 'text', text: '{"artists":["One","Two"],"discoveredAliases":[]}' }] };
+    const fetchFn = async (_url, opts) => {
+      calls.push(JSON.parse(opts.body).model);
+      return new Response(JSON.stringify(haikuResponse));
+    };
+    await extractArtists('short lineup text', { type: 'messy-text', fetchFn });
+    expect(calls).toEqual(['claude-haiku-4-5']);
   });
 
   it('falls back to Sonnet when Haiku returns empty', async () => {

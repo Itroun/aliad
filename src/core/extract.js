@@ -64,14 +64,25 @@ export async function extractArtists(content, { type, signal, fetchFn = fetch, o
 
   let result = await timedCall(HAIKU, systemPrompt, messages, { signal, fetchFn }, onCall, trimmed.length);
 
-  if (!result.artists?.length && trimmed.length > 20) {
-    result = await timedCall(SONNET, systemPrompt, messages, { signal, fetchFn }, onCall, trimmed.length);
+  if (looksUnderExtracted(result.artists, trimmed.length)) {
+    const sonnetResult = await timedCall(SONNET, systemPrompt, messages, { signal, fetchFn }, onCall, trimmed.length);
+    const sonnetCount = Array.isArray(sonnetResult.artists) ? sonnetResult.artists.length : 0;
+    const haikuCount = Array.isArray(result.artists) ? result.artists.length : 0;
+    if (sonnetCount >= haikuCount) result = sonnetResult;
   }
 
   return {
     artists: Array.isArray(result.artists) ? result.artists : [],
     discoveredAliases: Array.isArray(result.discoveredAliases) ? result.discoveredAliases : [],
   };
+}
+
+export function looksUnderExtracted(artists, inputChars) {
+  const n = Array.isArray(artists) ? artists.length : 0;
+  if (n === 0) return inputChars > 20;
+  if (inputChars < 2000) return false;
+  const expected = Math.min(20, Math.max(5, Math.floor(inputChars / 800)));
+  return n < expected;
 }
 
 async function timedCall(model, system, messages, { signal, fetchFn }, onCall, inputChars) {

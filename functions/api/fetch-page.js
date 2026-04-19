@@ -1,12 +1,14 @@
+import { fetchWithRetry } from '../../src/core/fetchWithRetry.js';
+import { checkRateLimit } from '../_lib/kvLimit.js';
+
+export { fetchWithRetry };
+
 const MAX_RESPONSE_BYTES = 1_048_576;
 const CHALLENGE_SNIFF_BYTES = 16_384;
 const OVERALL_TIMEOUT_MS = 30_000;
 const READER_TIMEOUT_MS = 15_000;
 const RATE_LIMIT = 10;
-const RATE_WINDOW_MS = 60_000;
-const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
-const DEFAULT_BACKOFF_MS = [500, 1500, 3500];
-const DEFAULT_JITTER = 0.25;
+const RATE_WINDOW_SEC = 60;
 
 export const CHROME_HEADERS = {
   'User-Agent':
@@ -56,19 +58,6 @@ export function isBlockedHost(hostname) {
   return false;
 }
 
-const hits = new Map();
-
-function isRateLimited(ip) {
-  const now = Date.now();
-  const entry = hits.get(ip);
-  if (!entry || now - entry.windowStart > RATE_WINDOW_MS) {
-    hits.set(ip, { windowStart: now, count: 1 });
-    return false;
-  }
-  entry.count++;
-  return entry.count > RATE_LIMIT;
-}
-
 export function looksLikeChallenge(text) {
   if (!text) return false;
   for (const marker of CHALLENGE_MARKERS) {
@@ -77,123 +66,21 @@ export function looksLikeChallenge(text) {
   return false;
 }
 
-function parseRetryAfter(header) {
-  if (!header) return null;
-  const secs = Number(header);
-  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
-  const date = Date.parse(header);
-  if (Number.isFinite(date)) return Math.max(0, date - Date.now());
-  return null;
-}
-
-function computeWait(retryAfterMs, backoffMs, attemptIdx, jitter, random) {
-  if (retryAfterMs != null) return Math.round(retryAfterMs);
-  const base = backoffMs[Math.min(attemptIdx, backoffMs.length - 1)];
-  const spread = base * jitter;
-  return Math.max(0, Math.round(base + (random() * 2 - 1) * spread));
-}
-
-function defaultSleep(ms, signal) {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener?.('abort', onAbort);
-      resolve();
-    }, ms);
-    function onAbort() {
-      clearTimeout(timer);
-      const err = new Error('Aborted');
-      err.name = 'AbortError';
-      reject(err);
-    }
-    if (signal?.aborted) {
-      clearTimeout(timer);
-      onAbort();
-      return;
-    }
-    signal?.addEventListener?.('abort', onAbort, { once: true });
-  });
-}
-
-export async function fetchWithRetry(
-  url,
-  init,
-  {
-    maxAttempts = 3,
-    backoffMs = DEFAULT_BACKOFF_MS,
-    jitter = DEFAULT_JITTER,
-    sleep = defaultSleep,
-    fetchFn = fetch,
-    signal,
-    random = Math.random,
-  } = {},
-) {
-  const attempts = [];
-
-  for (let i = 0; i < maxAttempts; i++) {
-    if (signal?.aborted) {
-      const err = new Error('Aborted');
-      err.name = 'AbortError';
-      throw err;
-    }
-
-    const attempt = { n: i + 1 };
-    attempts.push(attempt);
-
-    let res;
-    let fetchError;
-    try {
-      res = await fetchFn(url, { ...init, signal });
-    } catch (e) {
-      if (e?.name === 'AbortError' || signal?.aborted) throw e;
-      fetchError = e;
-      attempt.error = String(e?.message || e);
-    }
-
-    const failed = fetchError != null;
-    if (!failed) attempt.status = res.status;
-
-    const canRetry = failed || RETRYABLE_STATUS.has(res.status);
-    if (canRetry && i < maxAttempts - 1) {
-      const retryAfter = failed
-        ? null
-        : parseRetryAfter(res.headers.get('Retry-After'));
-      const wait = computeWait(retryAfter, backoffMs, i, jitter, random);
-      attempt.wait = wait;
-      await sleep(wait, signal);
-      continue;
-    }
-
-    if (failed) {
-      return {
-        ok: false,
-        reason: `network error: ${fetchError.message || fetchError}`,
-        attempts,
-      };
-    }
-    if (!res.ok) {
-      return {
-        ok: false,
-        reason: `upstream returned ${res.status}`,
-        status: res.status,
-        attempts,
-      };
-    }
-    return { ok: true, response: res, attempts };
-  }
-
-  return { ok: false, reason: 'retries exhausted', attempts };
-}
-
 export async function onRequest(context) {
-  const { request } = context;
+  const { request, env } = context;
 
   if (request.method !== 'GET') {
     return new Response('Method not allowed', { status: 405 });
   }
 
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  if (isRateLimited(ip)) {
+  const rate = await checkRateLimit(env, {
+    scope: 'fetch-page',
+    ip,
+    limit: RATE_LIMIT,
+    windowSec: RATE_WINDOW_SEC,
+  });
+  if (!rate.allowed) {
     return new Response('Too many requests', { status: 429 });
   }
 

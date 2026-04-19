@@ -1,5 +1,5 @@
 import { emptyResult } from './provider.js';
-import { fetchWithRetry } from '../core/retry.js';
+import { fetchWithRetry } from '../core/fetchWithRetry.js';
 import { normaliseName } from '../core/merge.js';
 
 export const name = 'musicbrainz';
@@ -42,15 +42,21 @@ async function fetchDetails(mbid, ctx) {
   return getJson(url, ctx);
 }
 
+const RETRY_OPTIONS = {
+  maxAttempts: 5,
+  backoffMs: [1000, 3000, 7000, 15000],
+};
+
 async function getJson(url, { signal, fetchFn, sleep }) {
-  const res = await fetchWithRetry(
-    fetchFn,
+  const result = await fetchWithRetry(
     url,
-    { signal, headers: { Accept: 'application/json' } },
-    { sleep },
+    { headers: { Accept: 'application/json' } },
+    { fetchFn, signal, sleep, ...RETRY_OPTIONS },
   );
-  if (!res.ok) throw new Error(`MusicBrainz ${res.status} for ${url}`);
-  return res.json();
+  if (!result.ok) {
+    throw new Error(`MusicBrainz ${result.status ?? result.reason} for ${url}`);
+  }
+  return result.response.json();
 }
 
 export function mapDetails(details) {

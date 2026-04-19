@@ -1,22 +1,13 @@
+import { checkRateLimit, checkDailyCeiling, incrementDailyCeiling } from '../_lib/kvLimit.js';
+
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 const ALLOWED_MODELS = ['claude-haiku-4-5', 'claude-sonnet-4-6'];
 const MAX_TOKENS_CAP = 4096;
 const RATE_LIMIT = 20;
-const RATE_WINDOW_MS = 60_000;
-
-const hits = new Map();
-
-function isRateLimited(ip) {
-  const now = Date.now();
-  const entry = hits.get(ip);
-  if (!entry || now - entry.windowStart > RATE_WINDOW_MS) {
-    hits.set(ip, { windowStart: now, count: 1 });
-    return false;
-  }
-  entry.count++;
-  return entry.count > RATE_LIMIT;
-}
+const RATE_WINDOW_SEC = 60;
+const DEFAULT_DAILY_REQUEST_LIMIT = 300;
+const DAILY_COUNTER_KEY = 'anthropic:usage';
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -26,8 +17,21 @@ export async function onRequest(context) {
   }
 
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  if (isRateLimited(ip)) {
+
+  const rate = await checkRateLimit(env, {
+    scope: 'anthropic',
+    ip,
+    limit: RATE_LIMIT,
+    windowSec: RATE_WINDOW_SEC,
+  });
+  if (!rate.allowed) {
     return new Response('Too many requests', { status: 429 });
+  }
+
+  const dailyLimit = Number(env.ANTHROPIC_DAILY_REQUEST_LIMIT) || DEFAULT_DAILY_REQUEST_LIMIT;
+  const ceiling = await checkDailyCeiling(env, { key: DAILY_COUNTER_KEY, limit: dailyLimit });
+  if (!ceiling.allowed) {
+    return new Response('Daily request budget exhausted', { status: 503 });
   }
 
   if (!env.ANTHROPIC_API_KEY) {
@@ -60,6 +64,10 @@ export async function onRequest(context) {
     },
     body: JSON.stringify(body),
   });
+
+  if (upstream.ok) {
+    context.waitUntil?.(incrementDailyCeiling(env, ceiling.storageKey));
+  }
 
   return new Response(upstream.body, {
     status: upstream.status,

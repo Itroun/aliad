@@ -1,5 +1,5 @@
 import { emptyResult } from './provider.js';
-import { fetchWithRetry } from '../core/retry.js';
+import { fetchWithRetry } from '../core/fetchWithRetry.js';
 import { normaliseName } from '../core/merge.js';
 
 export const name = 'discogs';
@@ -33,14 +33,15 @@ async function fetchDetails(id, ctx) {
 }
 
 async function getJson(url, { signal, fetchFn, sleep }) {
-  const res = await fetchWithRetry(
-    fetchFn,
+  const result = await fetchWithRetry(
     url,
-    { signal, headers: { Accept: 'application/json' } },
-    { sleep },
+    { headers: { Accept: 'application/json' } },
+    { fetchFn, signal, sleep },
   );
-  if (!res.ok) throw new Error(`Discogs ${res.status} for ${url}`);
-  return res.json();
+  if (!result.ok) {
+    throw new Error(`Discogs ${result.status ?? result.reason} for ${url}`);
+  }
+  return result.response.json();
 }
 
 function stripDisambiguation(name) {
