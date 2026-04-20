@@ -18,7 +18,8 @@ const h1 = document.createElement('h1');
 h1.textContent = 'aka';
 const tagline = document.createElement('p');
 tagline.className = 'tagline';
-tagline.textContent = 'Paste a festival lineup and discover each artist\u2019s aliases, side projects, and group memberships.';
+tagline.textContent =
+  'Paste a festival lineup and discover each artist\u2019s aliases, side projects, and group memberships.';
 header.append(h1, tagline);
 
 const resultsEl = document.createElement('div');
@@ -82,7 +83,9 @@ const form = createInput({
         },
         onBudgetExhausted: (artist, info) => {
           if (signal.aborted) return;
-          devProbe.note(`${artist} \u00b7 expansion budget hit (${info.skipped} aliases not explored)`);
+          devProbe.note(
+            `${artist} \u00b7 expansion budget hit (${info.skipped} aliases not explored)`,
+          );
         },
       });
     } catch (err) {
@@ -182,14 +185,15 @@ async function fetchWithFallbacks(url, { signal, onAttempt }) {
     onAttempt({ path: 'reader', state: 'fail', attempts: reader.attempts, reason: reader.reason });
   }
 
-  throw new Error('Could not fetch that URL (both direct and reader paths failed or returned too little content). Try copying the text from the page and pasting it instead.');
+  throw new Error(
+    'Could not fetch that URL (both direct and reader paths failed or returned too little content). Try copying the text from the page and pasting it instead.',
+  );
 }
 
 async function callProxy(url, mode, signal) {
-  const response = await fetch(
-    `/api/fetch-page?mode=${mode}&url=${encodeURIComponent(url)}`,
-    { signal },
-  );
+  const response = await fetch(`/api/fetch-page?mode=${mode}&url=${encodeURIComponent(url)}`, {
+    signal,
+  });
   let attempts = [];
   try {
     attempts = JSON.parse(response.headers.get('X-Fetch-Attempts') || '[]');
@@ -221,4 +225,3 @@ function summariseResult(r) {
   if (r?.relatedProjects?.length) parts.push(`${r.relatedProjects.length} related`);
   return parts.join(', ');
 }
-

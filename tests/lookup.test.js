@@ -96,8 +96,15 @@ describe('lookupAll', () => {
       name: 'p',
       async lookup(name) {
         lookups.push(name);
-        if (name === 'A') return { aliases: [{ name: 'B' }], groups: [], members: [], relatedProjects: [] };
-        if (name === 'B') return { aliases: [{ name: 'A' }], groups: [{ name: 'SomeGroup' }], members: [], relatedProjects: [] };
+        if (name === 'A')
+          return { aliases: [{ name: 'B' }], groups: [], members: [], relatedProjects: [] };
+        if (name === 'B')
+          return {
+            aliases: [{ name: 'A' }],
+            groups: [{ name: 'SomeGroup' }],
+            members: [],
+            relatedProjects: [],
+          };
         return { aliases: [], groups: [], members: [], relatedProjects: [] };
       },
     };
@@ -230,9 +237,122 @@ describe('lookupAll', () => {
     expect(lookups.length).toBeLessThanOrEqual(26);
   });
 
+  it('follows members when the root is itself a group', async () => {
+    const p = stubProvider('p', {
+      Shpongle: {
+        aliases: [],
+        groups: [],
+        members: [{ name: 'Raja Ram' }, { name: 'Simon Posford' }],
+        relatedProjects: [],
+      },
+      'Raja Ram': {
+        aliases: [],
+        groups: [{ name: 'The Infinity Project' }],
+        members: [],
+        relatedProjects: [],
+      },
+      'Simon Posford': {
+        aliases: [{ name: 'Hallucinogen' }],
+        groups: [],
+        members: [],
+        relatedProjects: [],
+      },
+    });
+
+    const results = await lookupAll(['Shpongle'], [p]);
+    const groupNames = results[0].merged.groups.map((g) => g.name).sort();
+    expect(groupNames).toEqual(['The Infinity Project']);
+    const infinity = results[0].merged.groups.find((g) => g.name === 'The Infinity Project');
+    expect(infinity.via).toBe('Raja Ram');
+  });
+
+  it('connects two group inputs via a shared member', async () => {
+    const p = stubProvider('p', {
+      Shpongle: {
+        aliases: [],
+        groups: [],
+        members: [{ name: 'Raja Ram' }],
+        relatedProjects: [],
+      },
+      'Celtic Cross': {
+        aliases: [],
+        groups: [],
+        members: [{ name: 'Raja Ram' }],
+        relatedProjects: [],
+      },
+      'Raja Ram': {
+        aliases: [],
+        groups: [{ name: 'Shpongle' }, { name: 'Celtic Cross' }, { name: 'The Infinity Project' }],
+        members: [],
+        relatedProjects: [],
+      },
+    });
+
+    const results = await lookupAll(['Shpongle', 'Celtic Cross'], [p]);
+    const shpongleGroups = results[0].merged.groups.map((g) => g.name);
+    // Shpongle discovers Celtic Cross (and Infinity Project) via Raja Ram; Shpongle itself is the root so not listed.
+    expect(shpongleGroups).toContain('Celtic Cross');
+    expect(shpongleGroups).toContain('The Infinity Project');
+    const celticViaRaja = results[0].merged.groups.find((g) => g.name === 'Celtic Cross');
+    expect(celticViaRaja.via).toBe('Raja Ram');
+  });
+
+  it('does not follow groups of a person (non-group node)', async () => {
+    const lookups = [];
+    const p = {
+      name: 'p',
+      async lookup(name) {
+        lookups.push(name);
+        if (name === 'Soloist') {
+          return {
+            aliases: [],
+            groups: [{ name: 'SomeBand' }],
+            members: [],
+            relatedProjects: [{ name: 'SomeProject' }],
+          };
+        }
+        return { aliases: [], groups: [], members: [], relatedProjects: [] };
+      },
+    };
+    await lookupAll(['Soloist'], [p]);
+    // Only the root was looked up — neither `groups` nor `relatedProjects` are followed.
+    expect(lookups).toEqual(['Soloist']);
+  });
+
+  it('records a multi-hop via chain', async () => {
+    const p = stubProvider('p', {
+      GroupA: {
+        aliases: [{ name: 'GroupA-Alias' }],
+        groups: [],
+        members: [],
+        relatedProjects: [],
+      },
+      'GroupA-Alias': {
+        aliases: [],
+        groups: [],
+        members: [{ name: 'Member1' }],
+        relatedProjects: [],
+      },
+      Member1: {
+        aliases: [],
+        groups: [{ name: 'OtherGroup' }],
+        members: [],
+        relatedProjects: [],
+      },
+    });
+
+    const results = await lookupAll(['GroupA'], [p]);
+    const other = results[0].merged.groups.find((g) => g.name === 'OtherGroup');
+    expect(other).toBeTruthy();
+    expect(other.via).toBe('Member1');
+    expect(other.viaChain).toEqual(['Member1', 'GroupA-Alias']);
+  });
+
   it('reports provider errors without failing the artist', async () => {
     const failing = stubProvider('bad', { Foo: new Error('rate limited') });
-    const working = stubProvider('good', { Foo: { aliases: [{ name: 'X' }], groups: [], members: [], relatedProjects: [] } });
+    const working = stubProvider('good', {
+      Foo: { aliases: [{ name: 'X' }], groups: [], members: [], relatedProjects: [] },
+    });
 
     const outcomes = [];
     const results = await lookupAll(['Foo'], [failing, working], {

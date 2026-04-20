@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { detectInputType, extractArtists, callLLM, looksUnderExtracted } from '../src/core/extract.js';
+import {
+  detectInputType,
+  extractArtists,
+  callLLM,
+  looksUnderExtracted,
+} from '../src/core/extract.js';
 import messy from './fixtures/anthropic-extract-messy-text.json';
 import html from './fixtures/anthropic-extract-html.json';
 
@@ -18,7 +23,8 @@ describe('detectInputType', () => {
   });
 
   it('returns messy for long prose lines', () => {
-    const prose = 'This festival features Infected Mushroom alongside Shpongle performing their latest album live on the main stage';
+    const prose =
+      'This festival features Infected Mushroom alongside Shpongle performing their latest album live on the main stage';
     expect(detectInputType(prose)).toBe('messy');
   });
 
@@ -36,7 +42,11 @@ describe('callLLM', () => {
   it('parses a valid Anthropic response', async () => {
     const fetchFn = async () => new Response(JSON.stringify(messy));
     const result = await callLLM(
-      { system: 'test', messages: [{ role: 'user', content: 'test' }], model: 'claude-haiku-4-5-20251001' },
+      {
+        system: 'test',
+        messages: [{ role: 'user', content: 'test' }],
+        model: 'claude-haiku-4-5-20251001',
+      },
       { fetchFn },
     );
     expect(result.artists).toContain('Shpongle');
@@ -45,11 +55,17 @@ describe('callLLM', () => {
 
   it('handles markdown-fenced JSON in response', async () => {
     const fenced = {
-      content: [{ type: 'text', text: '```json\n{"artists":["Test"],"discoveredAliases":[]}\n```' }],
+      content: [
+        { type: 'text', text: '```json\n{"artists":["Test"],"discoveredAliases":[]}\n```' },
+      ],
     };
     const fetchFn = async () => new Response(JSON.stringify(fenced));
     const result = await callLLM(
-      { system: 'test', messages: [{ role: 'user', content: 'test' }], model: 'claude-haiku-4-5-20251001' },
+      {
+        system: 'test',
+        messages: [{ role: 'user', content: 'test' }],
+        model: 'claude-haiku-4-5-20251001',
+      },
       { fetchFn },
     );
     expect(result.artists).toEqual(['Test']);
@@ -59,7 +75,11 @@ describe('callLLM', () => {
     const fetchFn = async () => new Response('Server error', { status: 500 });
     await expect(
       callLLM(
-        { system: 'test', messages: [{ role: 'user', content: 'test' }], model: 'claude-haiku-4-5-20251001' },
+        {
+          system: 'test',
+          messages: [{ role: 'user', content: 'test' }],
+          model: 'claude-haiku-4-5-20251001',
+        },
         { fetchFn },
       ),
     ).rejects.toThrow(/500/);
@@ -96,10 +116,10 @@ describe('extractArtists', () => {
 
   it('calls LLM for messy text', async () => {
     const fetchFn = async () => new Response(JSON.stringify(messy));
-    const result = await extractArtists(
-      'Infected Mushroom, Shpongle, Aphex Twin, and more...',
-      { type: 'messy-text', fetchFn },
-    );
+    const result = await extractArtists('Infected Mushroom, Shpongle, Aphex Twin, and more...', {
+      type: 'messy-text',
+      fetchFn,
+    });
     expect(result.artists).toContain('Infected Mushroom');
     expect(result.artists).toContain('Shpongle');
     expect(result.discoveredAliases.length).toBeGreaterThan(0);
@@ -107,19 +127,26 @@ describe('extractArtists', () => {
 
   it('calls LLM for html type', async () => {
     const fetchFn = async () => new Response(JSON.stringify(html));
-    const result = await extractArtists(
-      'Some festival page content about Dado vs Dino Psaras...',
-      { type: 'html', fetchFn },
-    );
+    const result = await extractArtists('Some festival page content about Dado vs Dino Psaras...', {
+      type: 'html',
+      fetchFn,
+    });
     expect(result.artists).toContain('Dado vs Dino Psaras');
     expect(result.discoveredAliases[0].aliases).toContain('Deedrah');
   });
 
   it('falls back to Sonnet when Haiku returns suspiciously few artists for a large input', async () => {
     const calls = [];
-    const haikuResponse = { content: [{ type: 'text', text: '{"artists":["One","Two"],"discoveredAliases":[]}' }] };
+    const haikuResponse = {
+      content: [{ type: 'text', text: '{"artists":["One","Two"],"discoveredAliases":[]}' }],
+    };
     const sonnetResponse = {
-      content: [{ type: 'text', text: '{"artists":["A","B","C","D","E","F","G","H"],"discoveredAliases":[]}' }],
+      content: [
+        {
+          type: 'text',
+          text: '{"artists":["A","B","C","D","E","F","G","H"],"discoveredAliases":[]}',
+        },
+      ],
     };
     const fetchFn = async (_url, opts) => {
       const body = JSON.parse(opts.body);
@@ -134,8 +161,12 @@ describe('extractArtists', () => {
   });
 
   it('keeps Haiku result when Sonnet returns fewer artists on fallback', async () => {
-    const haikuResponse = { content: [{ type: 'text', text: '{"artists":["One","Two"],"discoveredAliases":[]}' }] };
-    const sonnetResponse = { content: [{ type: 'text', text: '{"artists":["Only"],"discoveredAliases":[]}' }] };
+    const haikuResponse = {
+      content: [{ type: 'text', text: '{"artists":["One","Two"],"discoveredAliases":[]}' }],
+    };
+    const sonnetResponse = {
+      content: [{ type: 'text', text: '{"artists":["Only"],"discoveredAliases":[]}' }],
+    };
     const fetchFn = async (_url, opts) => {
       const body = JSON.parse(opts.body);
       if (body.model.includes('haiku')) return new Response(JSON.stringify(haikuResponse));
@@ -148,7 +179,9 @@ describe('extractArtists', () => {
 
   it('does not fall back for small inputs even with few artists', async () => {
     const calls = [];
-    const haikuResponse = { content: [{ type: 'text', text: '{"artists":["One","Two"],"discoveredAliases":[]}' }] };
+    const haikuResponse = {
+      content: [{ type: 'text', text: '{"artists":["One","Two"],"discoveredAliases":[]}' }],
+    };
     const fetchFn = async (_url, opts) => {
       calls.push(JSON.parse(opts.body).model);
       return new Response(JSON.stringify(haikuResponse));
@@ -159,8 +192,12 @@ describe('extractArtists', () => {
 
   it('falls back to Sonnet when Haiku returns empty', async () => {
     const calls = [];
-    const emptyResponse = { content: [{ type: 'text', text: '{"artists":[],"discoveredAliases":[]}' }] };
-    const sonnetResponse = { content: [{ type: 'text', text: '{"artists":["Found"],"discoveredAliases":[]}' }] };
+    const emptyResponse = {
+      content: [{ type: 'text', text: '{"artists":[],"discoveredAliases":[]}' }],
+    };
+    const sonnetResponse = {
+      content: [{ type: 'text', text: '{"artists":["Found"],"discoveredAliases":[]}' }],
+    };
     const fetchFn = async (_url, opts) => {
       const body = JSON.parse(opts.body);
       calls.push(body.model);

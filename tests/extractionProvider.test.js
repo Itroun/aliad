@@ -26,9 +26,7 @@ describe('createExtractionProvider', () => {
   });
 
   it('returns empty result for unknown artist', async () => {
-    const provider = createExtractionProvider([
-      { artist: 'Shpongle', aliases: ['Simon Posford'] },
-    ]);
+    const provider = createExtractionProvider([{ artist: 'Shpongle', aliases: ['Simon Posford'] }]);
     const result = await provider.lookup('Unknown Artist');
     expect(result.aliases).toEqual([]);
     expect(result.groups).toEqual([]);

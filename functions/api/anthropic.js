@@ -2,6 +2,7 @@ import { checkRateLimit, checkDailyCeiling, incrementDailyCeiling } from '../_li
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
+// Keep in sync with HAIKU/SONNET in src/core/extract.js — the frontend picks, this guards.
 const ALLOWED_MODELS = ['claude-haiku-4-5', 'claude-sonnet-4-6'];
 const MAX_TOKENS_CAP = 4096;
 const RATE_LIMIT = 20;
@@ -50,7 +51,9 @@ export async function onRequest(context) {
   }
 
   if (!ALLOWED_MODELS.includes(body.model)) {
-    return new Response(`Model not allowed. Use one of: ${ALLOWED_MODELS.join(', ')}`, { status: 400 });
+    return new Response(`Model not allowed. Use one of: ${ALLOWED_MODELS.join(', ')}`, {
+      status: 400,
+    });
   }
 
   body.max_tokens = Math.min(body.max_tokens ?? MAX_TOKENS_CAP, MAX_TOKENS_CAP);

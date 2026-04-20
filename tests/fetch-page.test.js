@@ -1,9 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import {
-  fetchWithRetry,
-  isBlockedHost,
-  looksLikeChallenge,
-} from '../functions/api/fetch-page.js';
+import { fetchWithRetry, isBlockedHost, looksLikeChallenge } from '../functions/api/fetch-page.js';
 
 function resp(status, { retryAfter } = {}) {
   return {
@@ -34,7 +30,8 @@ describe('looksLikeChallenge', () => {
   });
 
   it('returns false for a normal HTML page', () => {
-    const body = '<html><body><h1>Festival 2026 lineup</h1><ul><li>Aphex Twin</li></ul></body></html>';
+    const body =
+      '<html><body><h1>Festival 2026 lineup</h1><ul><li>Aphex Twin</li></ul></body></html>';
     expect(looksLikeChallenge(body)).toBe(false);
   });
 
@@ -106,11 +103,7 @@ describe('fetchWithRetry', () => {
       .mockResolvedValueOnce(resp(503))
       .mockResolvedValueOnce(resp(200));
 
-    const result = await fetchWithRetry(
-      'https://example.com',
-      {},
-      { fetchFn, sleep },
-    );
+    const result = await fetchWithRetry('https://example.com', {}, { fetchFn, sleep });
 
     expect(result.ok).toBe(true);
     expect(fetchFn).toHaveBeenCalledTimes(3);
@@ -132,11 +125,7 @@ describe('fetchWithRetry', () => {
       .mockRejectedValueOnce(new Error('ECONNRESET'))
       .mockResolvedValueOnce(resp(200));
 
-    const result = await fetchWithRetry(
-      'https://example.com',
-      {},
-      { fetchFn, sleep },
-    );
+    const result = await fetchWithRetry('https://example.com', {}, { fetchFn, sleep });
 
     expect(result.ok).toBe(true);
     expect(fetchFn).toHaveBeenCalledTimes(2);
@@ -147,11 +136,7 @@ describe('fetchWithRetry', () => {
     const sleep = vi.fn();
     const fetchFn = vi.fn().mockResolvedValue(resp(403));
 
-    const result = await fetchWithRetry(
-      'https://example.com',
-      {},
-      { fetchFn, sleep },
-    );
+    const result = await fetchWithRetry('https://example.com', {}, { fetchFn, sleep });
 
     expect(result.ok).toBe(false);
     expect(result.status).toBe(403);
@@ -181,11 +166,7 @@ describe('fetchWithRetry', () => {
     });
 
     await expect(
-      fetchWithRetry(
-        'https://example.com',
-        {},
-        { fetchFn, sleep, signal: controller.signal },
-      ),
+      fetchWithRetry('https://example.com', {}, { fetchFn, sleep, signal: controller.signal }),
     ).rejects.toMatchObject({ name: 'AbortError' });
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
@@ -195,11 +176,7 @@ describe('fetchWithRetry', () => {
     const sleep = vi.fn().mockResolvedValue(undefined);
     const fetchFn = vi.fn().mockResolvedValue(resp(503));
 
-    const result = await fetchWithRetry(
-      'https://example.com',
-      {},
-      { fetchFn, sleep },
-    );
+    const result = await fetchWithRetry('https://example.com', {}, { fetchFn, sleep });
 
     expect(result.ok).toBe(false);
     expect(result.attempts).toHaveLength(3);

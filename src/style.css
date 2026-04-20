@@ -5,11 +5,18 @@
   --card-bg: #fff;
   --border: #e3e3e3;
   --accent: #4a3aff;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    sans-serif;
   color-scheme: light;
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
 body {
   margin: 0;
@@ -80,9 +87,15 @@ h1 {
   cursor: pointer;
 }
 
-.lineup-form button:hover { filter: brightness(1.1); }
+.lineup-form button:hover {
+  filter: brightness(1.1);
+}
 
-.results { margin-top: 2rem; display: grid; gap: 1rem; }
+.results {
+  margin-top: 2rem;
+  display: grid;
+  gap: 1rem;
+}
 
 .artist-card {
   background: var(--card-bg);
@@ -91,11 +104,22 @@ h1 {
   padding: 1rem 1.25rem;
 }
 
-.artist-card h2 { margin: 0 0 0.25rem; font-size: 1.2rem; }
-.artist-status { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.85rem; }
-.artist-status.has-error { color: #9a1e1e; }
+.artist-card h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.2rem;
+}
+.artist-status {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.artist-status.has-error {
+  color: #9a1e1e;
+}
 
-.artist-body section { margin-top: 0.75rem; }
+.artist-body section {
+  margin-top: 0.75rem;
+}
 .artist-body h3 {
   margin: 0 0 0.25rem;
   font-size: 0.8rem;
@@ -103,8 +127,15 @@ h1 {
   letter-spacing: 0.04em;
   color: var(--muted);
 }
-.artist-body ul { margin: 0; padding-left: 1.25rem; }
-.artist-empty { margin: 0; color: var(--muted); font-style: italic; }
+.artist-body ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+.artist-empty {
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+}
 
 .dev-probe {
   margin: 0.75rem 0 0;
@@ -124,10 +155,27 @@ h1 {
   color: #7a5a18;
   font-weight: 600;
 }
-.dev-probe ul { margin: 0; padding-left: 1.1rem; list-style: none; }
-.dev-probe li { margin: 0.15rem 0; }
-.dev-probe li::before { content: '\2022  '; color: #b88a2c; }
-.dev-probe .state-start { color: #7a5a18; }
-.dev-probe .state-ok    { color: #1a6f2a; }
-.dev-probe .state-fail  { color: #9a1e1e; }
-.dev-probe .state-info  { color: #44474d; }
+.dev-probe ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  list-style: none;
+}
+.dev-probe li {
+  margin: 0.15rem 0;
+}
+.dev-probe li::before {
+  content: '\2022  ';
+  color: #b88a2c;
+}
+.dev-probe .state-start {
+  color: #7a5a18;
+}
+.dev-probe .state-ok {
+  color: #1a6f2a;
+}
+.dev-probe .state-fail {
+  color: #9a1e1e;
+}
+.dev-probe .state-info {
+  color: #44474d;
+}

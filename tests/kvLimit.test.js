@@ -10,7 +10,9 @@ function fakeKV(initial = {}) {
   return {
     store,
     get: async (k) => store.get(k) ?? null,
-    put: async (k, v) => { store.set(k, v); },
+    put: async (k, v) => {
+      store.set(k, v);
+    },
   };
 }
 
@@ -23,8 +25,14 @@ describe('checkRateLimit', () => {
   it('allows under the limit and increments the counter', async () => {
     const KV = fakeKV();
     const now = () => 1_700_000_000_000;
-    const first = await checkRateLimit({ KV }, { scope: 's', ip: '1.1.1.1', limit: 3, windowSec: 60, now });
-    const second = await checkRateLimit({ KV }, { scope: 's', ip: '1.1.1.1', limit: 3, windowSec: 60, now });
+    const first = await checkRateLimit(
+      { KV },
+      { scope: 's', ip: '1.1.1.1', limit: 3, windowSec: 60, now },
+    );
+    const second = await checkRateLimit(
+      { KV },
+      { scope: 's', ip: '1.1.1.1', limit: 3, windowSec: 60, now },
+    );
     expect(first).toEqual({ allowed: true, count: 1 });
     expect(second).toEqual({ allowed: true, count: 2 });
   });
@@ -58,15 +66,29 @@ describe('checkRateLimit', () => {
     const KV = fakeKV();
     const now = () => 1_700_000_000_000;
     await checkRateLimit({ KV }, { scope: 'a', ip: '1.1.1.1', limit: 1, windowSec: 60, now });
-    const otherScope = await checkRateLimit({ KV }, { scope: 'b', ip: '1.1.1.1', limit: 1, windowSec: 60, now });
-    const otherIp = await checkRateLimit({ KV }, { scope: 'a', ip: '2.2.2.2', limit: 1, windowSec: 60, now });
+    const otherScope = await checkRateLimit(
+      { KV },
+      { scope: 'b', ip: '1.1.1.1', limit: 1, windowSec: 60, now },
+    );
+    const otherIp = await checkRateLimit(
+      { KV },
+      { scope: 'a', ip: '2.2.2.2', limit: 1, windowSec: 60, now },
+    );
     expect(otherScope.allowed).toBe(true);
     expect(otherIp.allowed).toBe(true);
   });
 
   it('fails open if KV throws', async () => {
-    const KV = { get: async () => { throw new Error('kv down'); }, put: async () => {} };
-    const result = await checkRateLimit({ KV }, { scope: 's', ip: '1.1.1.1', limit: 1, windowSec: 60 });
+    const KV = {
+      get: async () => {
+        throw new Error('kv down');
+      },
+      put: async () => {},
+    };
+    const result = await checkRateLimit(
+      { KV },
+      { scope: 's', ip: '1.1.1.1', limit: 1, windowSec: 60 },
+    );
     expect(result).toEqual({ allowed: true, degraded: true });
   });
 });

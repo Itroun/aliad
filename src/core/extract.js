@@ -1,5 +1,6 @@
 import { parseLineup } from '../ui/input.js';
 
+// Keep in sync with ALLOWED_MODELS in functions/api/anthropic.js — the proxy enforces.
 const HAIKU = 'claude-haiku-4-5';
 const SONNET = 'claude-sonnet-4-6';
 
@@ -31,13 +32,17 @@ Rules:
 - Return valid JSON only, no markdown fencing`;
 
 export function detectInputType(text) {
-  const lines = String(text ?? '').split('\n').filter((l) => l.trim());
+  const lines = String(text ?? '')
+    .split('\n')
+    .filter((l) => l.trim());
   if (!lines.length) return 'clean';
 
   const hasCommaSeparatedNames = lines.some((line) => /,\s*[A-Z]/.test(line));
   if (hasCommaSeparatedNames) return 'messy';
 
-  const hasBullets = lines.some((line) => /^\s*[\u2022\-\*]\s/.test(line) || /^\s*\d+[\.\)]\s/.test(line));
+  const hasBullets = lines.some(
+    (line) => /^\s*[\u2022\-\*]\s/.test(line) || /^\s*\d+[\.\)]\s/.test(line),
+  );
   if (hasBullets) return 'messy';
 
   const hasProseLines = lines.filter((l) => l.trim().length > 80).length >= 2;
@@ -62,10 +67,24 @@ export async function extractArtists(content, { type, signal, fetchFn = fetch, o
   const trimmed = content.trim();
   const messages = [{ role: 'user', content: trimmed }];
 
-  let result = await timedCall(HAIKU, systemPrompt, messages, { signal, fetchFn }, onCall, trimmed.length);
+  let result = await timedCall(
+    HAIKU,
+    systemPrompt,
+    messages,
+    { signal, fetchFn },
+    onCall,
+    trimmed.length,
+  );
 
   if (looksUnderExtracted(result.artists, trimmed.length)) {
-    const sonnetResult = await timedCall(SONNET, systemPrompt, messages, { signal, fetchFn }, onCall, trimmed.length);
+    const sonnetResult = await timedCall(
+      SONNET,
+      systemPrompt,
+      messages,
+      { signal, fetchFn },
+      onCall,
+      trimmed.length,
+    );
     const sonnetCount = Array.isArray(sonnetResult.artists) ? sonnetResult.artists.length : 0;
     const haikuCount = Array.isArray(result.artists) ? result.artists.length : 0;
     if (sonnetCount >= haikuCount) result = sonnetResult;

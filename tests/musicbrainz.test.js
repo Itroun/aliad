@@ -29,14 +29,8 @@ describe('musicbrainz.lookup', () => {
 
     const result = await lookup('Infected Mushroom', { fetchFn });
 
-    expect(result.members.map((m) => m.name).sort()).toEqual([
-      'Amit Duvdevani',
-      'Erez Aizen',
-    ]);
-    expect(result.groups.map((g) => g.name).sort()).toEqual([
-      'Fly Agaric',
-      'Psy Trance Mafia',
-    ]);
+    expect(result.members.map((m) => m.name).sort()).toEqual(['Amit Duvdevani', 'Erez Aizen']);
+    expect(result.groups.map((g) => g.name).sort()).toEqual(['Fly Agaric', 'Psy Trance Mafia']);
     expect(result.relatedProjects.map((r) => r.name)).toEqual(['Infected Deedrah']);
     expect(result.aliases.length).toBeGreaterThan(0);
   });
@@ -60,7 +54,14 @@ describe('musicbrainz.lookup', () => {
   it('rejects high-score results whose name and aliases do not match', async () => {
     const mismatch = {
       count: 1,
-      artists: [{ id: 'abc', name: 'Totally Different Band', score: 100, aliases: [{ name: 'Another Name' }] }],
+      artists: [
+        {
+          id: 'abc',
+          name: 'Totally Different Band',
+          score: 100,
+          aliases: [{ name: 'Another Name' }],
+        },
+      ],
     };
     const fetchFn = fakeFetch([['/artist?query=', mismatch]]);
     const result = await lookup('Infected Mushroom', { fetchFn });
@@ -89,7 +90,9 @@ describe('musicbrainz.lookup', () => {
   });
 
   it('propagates network errors', async () => {
-    const fetchFn = async () => { throw new Error('offline'); };
+    const fetchFn = async () => {
+      throw new Error('offline');
+    };
     await expect(lookup('whatever', { fetchFn, sleep: () => {} })).rejects.toThrow('offline');
   });
 

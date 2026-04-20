@@ -41,9 +41,7 @@ export async function fetchWithRetry(
 
     const canRetry = failed || RETRYABLE_STATUS.has(res.status);
     if (canRetry && i < maxAttempts - 1) {
-      const retryAfter = failed
-        ? null
-        : parseRetryAfter(res.headers?.get?.('Retry-After'));
+      const retryAfter = failed ? null : parseRetryAfter(res.headers?.get?.('Retry-After'));
       const wait = computeWait(retryAfter, backoffMs, i, jitter, random);
       attempt.wait = wait;
       await sleep(wait, signal);
