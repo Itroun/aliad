@@ -36,7 +36,56 @@ export function createResults(container) {
     card.markComplete(summary);
   }
 
-  return { start, onArtistDone, onArtistComplete, clear };
+  function renderClusters({ clusters, singletons }) {
+    cards = new Map();
+    container.replaceChildren();
+
+    if (clusters.length) {
+      const section = document.createElement('section');
+      section.className = 'clusters';
+      const h2 = document.createElement('h2');
+      h2.textContent = 'Same act, different names';
+      section.append(h2);
+      for (const cluster of clusters) {
+        const article = document.createElement('article');
+        article.className = 'cluster';
+        const ul = document.createElement('ul');
+        for (const name of cluster.names) {
+          const li = document.createElement('li');
+          li.textContent = name;
+          ul.append(li);
+        }
+        article.append(ul);
+        section.append(article);
+      }
+      container.append(section);
+    }
+
+    if (singletons.length) {
+      const section = document.createElement('section');
+      section.className = 'singletons';
+      const h2 = document.createElement('h2');
+      h2.textContent = 'No aliases on the lineup';
+      section.append(h2);
+      const ul = document.createElement('ul');
+      for (const { name } of singletons) {
+        const li = document.createElement('li');
+        li.textContent = name;
+        ul.append(li);
+      }
+      section.append(ul);
+      container.append(section);
+    }
+
+    if (!clusters.length && !singletons.length) {
+      const empty = document.createElement('p');
+      empty.className = 'results-empty';
+      empty.textContent = 'No results.';
+      container.append(empty);
+    }
+  }
+
+  return { start, onArtistDone, onArtistComplete, renderClusters, clear };
 }
 
 function renderCard(artistName) {

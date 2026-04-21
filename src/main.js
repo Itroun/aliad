@@ -3,6 +3,7 @@ import { createInput } from './ui/input.js';
 import { createResults } from './ui/results.js';
 import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
+import { clusterArtists } from './core/cluster.js';
 import { detectInputType, extractArtists } from './core/extract.js';
 import { createExtractionProvider } from './core/extractionProvider.js';
 import { cleanHTML } from './core/cleanHTML.js';
@@ -67,7 +68,7 @@ const form = createInput({
 
       results.start(artists);
 
-      await lookupAll(artists, activeProviders, {
+      const finalResults = await lookupAll(artists, activeProviders, {
         signal,
         onProviderResult: (artist, provider, outcome) => {
           if (signal.aborted) return;
@@ -88,6 +89,9 @@ const form = createInput({
           );
         },
       });
+
+      if (signal.aborted) return;
+      results.renderClusters(clusterArtists(finalResults));
     } catch (err) {
       if (err?.name === 'AbortError') return;
       if (signal.aborted) return;

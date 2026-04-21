@@ -348,6 +348,51 @@ describe('lookupAll', () => {
     expect(other.viaChain).toEqual(['Member1', 'GroupA-Alias']);
   });
 
+  it('caps alias fan-out: registers names in closure without walking them', async () => {
+    const lookups = [];
+    // 20 aliases on the root node, exceeding the fan-out cap of 15. Each alias
+    // would normally be looked up; with the cap, none are, but all names should
+    // still land in the closure.
+    const aliases = Array.from({ length: 20 }, (_, i) => ({ name: `Pseudonym-${i}` }));
+    aliases.push({ name: 'LineupMatch' }); // one of the names matches another input
+    const p = {
+      name: 'p',
+      async lookup(name) {
+        lookups.push(name);
+        if (name === 'Prolific') {
+          return { aliases, groups: [], members: [], relatedProjects: [] };
+        }
+        return { aliases: [], groups: [], members: [], relatedProjects: [] };
+      },
+    };
+
+    const results = await lookupAll(['Prolific', 'LineupMatch'], [p]);
+    // Only the two root lookups happen — no aliases are walked from Prolific.
+    expect(lookups.sort()).toEqual(['LineupMatch', 'Prolific']);
+    // But LineupMatch's name is in Prolific's closure so clustering can union them.
+    const prolific = results.find((r) => r.name === 'Prolific');
+    expect(prolific.closure.has('lineupmatch')).toBe(true);
+    expect(prolific.closure.has('pseudonym 0')).toBe(true);
+  });
+
+  it('walks aliases normally when the fan-out is at or below the cap', async () => {
+    const lookups = [];
+    const aliases = Array.from({ length: 10 }, (_, i) => ({ name: `Alt-${i}` }));
+    const p = {
+      name: 'p',
+      async lookup(name) {
+        lookups.push(name);
+        if (name === 'Small') {
+          return { aliases, groups: [], members: [], relatedProjects: [] };
+        }
+        return { aliases: [], groups: [], members: [], relatedProjects: [] };
+      },
+    };
+    await lookupAll(['Small'], [p]);
+    // Root + all 10 aliases = 11 lookups.
+    expect(lookups).toHaveLength(11);
+  });
+
   it('reports provider errors without failing the artist', async () => {
     const failing = stubProvider('bad', { Foo: new Error('rate limited') });
     const working = stubProvider('good', {

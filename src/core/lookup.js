@@ -3,6 +3,7 @@ import { createQueue } from './rateLimit.js';
 
 const EXPAND_SKIP_TYPES = new Set(['Search hint', 'Legal name']);
 const MAX_EXPANSION_LOOKUPS = 25;
+const ALIAS_FANOUT_CAP = 15;
 
 function shouldExpandAlias(alias) {
   return !alias?.type || !EXPAND_SKIP_TYPES.has(alias.type);
@@ -39,12 +40,13 @@ export function lookupAll(names, providers, callbacks = {}) {
       let merged = mergeResults(...perProvider.filter(Boolean));
       onArtistDone?.(name, merged);
 
-      merged = await expandIdentityGraph(name, merged, queued, callbacks);
+      const expanded = await expandIdentityGraph(name, merged, queued, callbacks);
+      merged = expanded.merged;
 
       const queried = Object.keys(initialOutcomes).filter((k) => initialOutcomes[k].ok);
       const errored = Object.keys(initialOutcomes).filter((k) => !initialOutcomes[k].ok);
       onArtistComplete?.(name, merged, { queried, errored });
-      return { name, merged };
+      return { name, merged, closure: expanded.closure };
     }),
   );
 }
@@ -100,15 +102,26 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks)
     onBudgetExhausted?.(artistName, { skipped: pending.length });
   }
 
-  return accumulated;
+  return { merged: accumulated, closure: visited };
 }
 
 function enqueueFromNode(pending, visited, node, viaChain) {
-  for (const alias of node.aliases ?? []) {
-    if (!shouldExpandAlias(alias)) continue;
-    const key = normaliseName(alias?.name);
-    if (!key || visited.has(key)) continue;
-    pending.push({ name: alias.name, viaChain });
+  const walkableAliases = (node.aliases ?? []).filter(shouldExpandAlias);
+  if (walkableAliases.length > ALIAS_FANOUT_CAP) {
+    // Prolific-artist cap: register names in the closure so lineup matches
+    // still get detected, but don't walk into each alias. Without this, a
+    // node with 50+ pseudonyms (e.g. M.I.K.E. on Discogs) eats the whole
+    // expansion budget on redundant lookups of the same underlying artist.
+    for (const alias of walkableAliases) {
+      const key = normaliseName(alias?.name);
+      if (key) visited.add(key);
+    }
+  } else {
+    for (const alias of walkableAliases) {
+      const key = normaliseName(alias?.name);
+      if (!key || visited.has(key)) continue;
+      pending.push({ name: alias.name, viaChain });
+    }
   }
   // Follow members only when the node is itself a group — i.e. has any members.
   // This captures group-to-group-via-shared-person overlaps while avoiding
