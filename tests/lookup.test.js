@@ -393,6 +393,156 @@ describe('lookupAll', () => {
     expect(lookups).toHaveLength(11);
   });
 
+  it('coalesces concurrent lookups for the same name across roots', async () => {
+    const calls = [];
+    const p = {
+      name: 'p',
+      async lookup(name) {
+        calls.push(name);
+        if (name === 'A') {
+          return {
+            aliases: [{ name: 'Shared' }],
+            groups: [],
+            members: [],
+            relatedProjects: [],
+          };
+        }
+        if (name === 'B') {
+          return {
+            aliases: [{ name: 'Shared' }],
+            groups: [],
+            members: [],
+            relatedProjects: [],
+          };
+        }
+        return {
+          aliases: [],
+          groups: [{ name: 'SharedGroup' }],
+          members: [],
+          relatedProjects: [],
+        };
+      },
+    };
+
+    const outcomes = [];
+    const results = await lookupAll(['A', 'B'], [p], {
+      onProviderResult: (_artist, _provider, outcome) => {
+        if (outcome.via === 'Shared') outcomes.push(outcome);
+      },
+    });
+    // Shared is not a root, so both A's and B's walks want it. Cache should
+    // ensure exactly one lookup is issued for Shared.
+    const sharedCalls = calls.filter((n) => n === 'Shared');
+    expect(sharedCalls).toHaveLength(1);
+    // Both closures still contain the shared alias.
+    for (const r of results) {
+      expect(r.closure.has('shared')).toBe(true);
+    }
+    // Exactly one of the two walks issued the real call; the other got a cache hit.
+    const firstCallers = outcomes.filter((o) => o.cached === false);
+    const cacheHits = outcomes.filter((o) => o.cached === true);
+    expect(firstCallers).toHaveLength(1);
+    expect(cacheHits).toHaveLength(1);
+  });
+
+  it('caches repeated lookups across initial and expansion phases', async () => {
+    const calls = [];
+    const p = {
+      name: 'p',
+      async lookup(name) {
+        calls.push(name);
+        if (name === 'A') {
+          return { aliases: [{ name: 'C' }], groups: [], members: [], relatedProjects: [] };
+        }
+        if (name === 'B') {
+          return { aliases: [{ name: 'A' }], groups: [], members: [], relatedProjects: [] };
+        }
+        return { aliases: [], groups: [], members: [], relatedProjects: [] };
+      },
+    };
+
+    // A is both a root and an alias reachable from B. Cache + root-skip means
+    // A is looked up exactly once (for its own root walk).
+    await lookupAll(['A', 'B'], [p]);
+    const aCalls = calls.filter((n) => n === 'A');
+    expect(aCalls).toHaveLength(1);
+  });
+
+  it('skips expansion lookup for names that are themselves roots', async () => {
+    const calls = [];
+    const p = {
+      name: 'p',
+      async lookup(name) {
+        calls.push(name);
+        if (name === 'A') {
+          return { aliases: [{ name: 'B' }], groups: [], members: [], relatedProjects: [] };
+        }
+        if (name === 'B') {
+          return {
+            aliases: [],
+            groups: [{ name: 'B-Group' }],
+            members: [],
+            relatedProjects: [],
+          };
+        }
+        return { aliases: [], groups: [], members: [], relatedProjects: [] };
+      },
+    };
+
+    const results = await lookupAll(['A', 'B'], [p]);
+    // B is a root, so A's walk should not look up B for expansion.
+    // B still gets looked up exactly once for its own root walk.
+    expect(calls.filter((n) => n === 'B')).toHaveLength(1);
+    // A's closure contains B so clustering can union them.
+    const a = results.find((r) => r.name === 'A');
+    expect(a.closure.has('b')).toBe(true);
+  });
+
+  it('still clusters transitively across roots even with root-skip', async () => {
+    // A -> B (root), B -> C (root), C stands alone. Clustering union over
+    // closures should still join all three.
+    const p = stubProvider('p', {
+      A: { aliases: [{ name: 'B' }], groups: [], members: [], relatedProjects: [] },
+      B: { aliases: [{ name: 'C' }], groups: [], members: [], relatedProjects: [] },
+      C: { aliases: [], groups: [], members: [], relatedProjects: [] },
+    });
+
+    const results = await lookupAll(['A', 'B', 'C'], [p]);
+    const a = results.find((r) => r.name === 'A');
+    const b = results.find((r) => r.name === 'B');
+    expect(a.closure.has('b')).toBe(true);
+    expect(b.closure.has('c')).toBe(true);
+  });
+
+  it('coalesces failures without retrying the shared call', async () => {
+    const calls = [];
+    const p = {
+      name: 'p',
+      async lookup(name) {
+        calls.push(name);
+        if (name === 'Shared') throw new Error('boom');
+        return {
+          aliases: [{ name: 'Shared' }],
+          groups: [],
+          members: [],
+          relatedProjects: [],
+        };
+      },
+    };
+
+    const errors = [];
+    await lookupAll(['A', 'B'], [p], {
+      onProviderResult: (_artist, _provider, outcome) => {
+        if (!outcome.ok) errors.push(outcome.error.message);
+      },
+    });
+    // Both walks tried Shared, but the cache returned the same rejected promise
+    // to both, so only one upstream call was actually made.
+    expect(calls.filter((n) => n === 'Shared')).toHaveLength(1);
+    // And both walks saw the error (one from each expansion attempt).
+    expect(errors.filter((m) => m === 'boom').length).toBeGreaterThanOrEqual(2);
+  });
+
   it('reports provider errors without failing the artist', async () => {
     const failing = stubProvider('bad', { Foo: new Error('rate limited') });
     const working = stubProvider('good', {

@@ -3,7 +3,6 @@ import { createInput } from './ui/input.js';
 import { createResults } from './ui/results.js';
 import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
-import { clusterArtists } from './core/cluster.js';
 import { detectInputType, extractArtists } from './core/extract.js';
 import { createExtractionProvider } from './core/extractionProvider.js';
 import { cleanHTML } from './core/cleanHTML.js';
@@ -68,15 +67,11 @@ const form = createInput({
 
       results.start(artists);
 
-      const finalResults = await lookupAll(artists, activeProviders, {
+      await lookupAll(artists, activeProviders, {
         signal,
         onProviderResult: (artist, provider, outcome) => {
           if (signal.aborted) return;
           devProbe.note(formatProviderNote(artist, provider, outcome));
-        },
-        onArtistDone: (artist, merged) => {
-          if (signal.aborted) return;
-          results.onArtistDone(artist, merged);
         },
         onArtistComplete: (artist, merged, summary) => {
           if (signal.aborted) return;
@@ -91,7 +86,7 @@ const form = createInput({
       });
 
       if (signal.aborted) return;
-      results.renderClusters(clusterArtists(finalResults));
+      results.finalize();
     } catch (err) {
       if (err?.name === 'AbortError') return;
       if (signal.aborted) return;
@@ -101,9 +96,8 @@ const form = createInput({
   },
 });
 
-app.append(header, form, statusEl);
+app.append(header, form, statusEl, resultsEl);
 if (devProbe.el) app.append(devProbe.el);
-app.append(resultsEl);
 
 function extract(content, type, signal) {
   return extractArtists(content, {
@@ -213,12 +207,13 @@ async function callProxy(url, mode, signal) {
 
 function formatProviderNote(artist, provider, outcome) {
   const label = outcome.via ? `${artist} (via ${outcome.via})` : artist;
+  const suffix = outcome.cached ? ' \u00b7 cached' : '';
   if (!outcome.ok) {
     const reason = outcome.error?.message || 'failed';
-    return `${label} \u00b7 ${provider} \u00b7 error: ${reason}`;
+    return `${label} \u00b7 ${provider} \u00b7 error: ${reason}${suffix}`;
   }
   const counts = summariseResult(outcome.result);
-  return `${label} \u00b7 ${provider} \u00b7 ${counts || 'no data'}`;
+  return `${label} \u00b7 ${provider} \u00b7 ${counts || 'no data'}${suffix}`;
 }
 
 function summariseResult(r) {

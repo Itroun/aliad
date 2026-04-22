@@ -1,80 +1,114 @@
-const SECTIONS = [
-  { key: 'aliases', label: 'Also known as' },
-  { key: 'groups', label: 'Member of' },
-  { key: 'members', label: 'Members' },
-  { key: 'relatedProjects', label: 'Related projects' },
-];
+import { clusterArtists } from '../core/cluster.js';
 
 export function createResults(container) {
-  let cards = new Map();
+  let total = 0;
+  let completed = [];
+  let section = null;
+  let clustersListEl = null;
+  let progressEl = null;
+  let finalized = false;
 
   function clear() {
-    cards = new Map();
+    total = 0;
+    completed = [];
+    section = null;
+    clustersListEl = null;
+    progressEl = null;
+    finalized = false;
     container.replaceChildren();
-  }
-
-  function ensureCard(artistName) {
-    if (cards.has(artistName)) return cards.get(artistName);
-    const card = renderCard(artistName);
-    cards.set(artistName, card);
-    container.append(card.root);
-    return card;
   }
 
   function start(artistNames) {
     clear();
-    for (const name of artistNames) ensureCard(name);
+    total = artistNames.length;
+
+    section = document.createElement('section');
+    section.className = 'clusters';
+
+    const h2 = document.createElement('h2');
+    h2.textContent = 'Same act, different names';
+    section.append(h2);
+
+    const hint = document.createElement('p');
+    hint.className = 'clusters-hint';
+    hint.textContent =
+      'Matches will appear here as artists are looked up. Groupings may combine as more data arrives.';
+    section.append(hint);
+
+    clustersListEl = document.createElement('div');
+    clustersListEl.className = 'clusters-list';
+    section.append(clustersListEl);
+
+    progressEl = document.createElement('p');
+    progressEl.className = 'clusters-progress';
+    progressEl.textContent = `0 of ${total} artists checked…`;
+    section.append(progressEl);
+
+    container.append(section);
   }
 
-  function onArtistDone(artistName, merged) {
-    ensureCard(artistName).renderData(merged);
+  function onArtistDone() {
+    // No-op: per-artist cards are not rendered during processing. The
+    // callback is kept so `lookupAll` can continue to call it without error.
   }
 
-  function onArtistComplete(artistName, merged, summary) {
-    const card = ensureCard(artistName);
-    card.renderData(merged);
-    card.markComplete(summary);
+  function onArtistComplete(artistName, _merged, { queried = [], errored = [], closure } = {}) {
+    if (finalized) return;
+    completed.push({
+      name: artistName,
+      closure: closure ?? new Set(),
+      fullyErrored: queried.length === 0 && errored.length > 0,
+    });
+    rerenderClusters();
+    updateProgress();
   }
 
-  function renderClusters({ clusters, singletons }) {
-    cards = new Map();
-    container.replaceChildren();
+  function rerenderClusters() {
+    const { clusters } = clusterArtists(completed);
+    renderClusterList(clusters);
+  }
 
-    if (clusters.length) {
-      const section = document.createElement('section');
-      section.className = 'clusters';
-      const h2 = document.createElement('h2');
-      h2.textContent = 'Same act, different names';
-      section.append(h2);
-      for (const cluster of clusters) {
-        const article = document.createElement('article');
-        article.className = 'cluster';
-        const ul = document.createElement('ul');
-        for (const name of cluster.names) {
-          const li = document.createElement('li');
-          li.textContent = name;
-          ul.append(li);
-        }
-        article.append(ul);
-        section.append(article);
-      }
-      container.append(section);
+  function updateProgress() {
+    if (!progressEl) return;
+    progressEl.textContent = `${completed.length} of ${total} artists checked…`;
+  }
+
+  function finalize() {
+    if (finalized) return;
+    finalized = true;
+
+    const { clusters, singletons } = clusterArtists(completed);
+    renderClusterList(clusters);
+
+    if (progressEl) {
+      progressEl.remove();
+      progressEl = null;
     }
 
     if (singletons.length) {
-      const section = document.createElement('section');
-      section.className = 'singletons';
+      const singletonsSection = document.createElement('section');
+      singletonsSection.className = 'singletons';
       const h2 = document.createElement('h2');
       h2.textContent = 'No aliases on the lineup';
-      section.append(h2);
+      singletonsSection.append(h2);
       const ul = document.createElement('ul');
       for (const { name } of singletons) {
         const li = document.createElement('li');
         li.textContent = name;
         ul.append(li);
       }
-      section.append(ul);
-      container.append(section);
+      singletonsSection.append(ul);
+      container.append(singletonsSection);
+    }
+
+    const failed = completed.filter((c) => c.fullyErrored);
+    if (failed.length) {
+      const banner = document.createElement('p');
+      banner.className = 'errored-banner';
+      const names = failed.map((c) => c.name).join(', ');
+      const word = failed.length === 1 ? 'artist' : 'artists';
+      banner.textContent = `${failed.length} ${word} couldn’t be checked: ${names}`;
+      container.append(banner);
     }
 
     if (!clusters.length && !singletons.length) {
@@ -85,72 +119,22 @@ export function createResults(container) {
     }
   }
 
-  return { start, onArtistDone, onArtistComplete, renderClusters, clear };
-}
-
-function renderCard(artistName) {
-  const root = document.createElement('article');
-  root.className = 'artist-card';
-
-  const heading = document.createElement('h2');
-  heading.textContent = artistName;
-  root.append(heading);
-
-  const status = document.createElement('p');
-  status.className = 'artist-status';
-  status.textContent = 'Searching\u2026';
-  root.append(status);
-
-  const body = document.createElement('div');
-  body.className = 'artist-body';
-  root.append(body);
-
-  function renderData(merged) {
-    body.replaceChildren();
-    let anyContent = false;
-    for (const { key, label } of SECTIONS) {
-      const entries = merged?.[key] ?? [];
-      if (!entries.length) continue;
-      anyContent = true;
-      const section = document.createElement('section');
-      const h3 = document.createElement('h3');
-      h3.textContent = label;
+  function renderClusterList(clusters) {
+    if (!clustersListEl) return;
+    clustersListEl.replaceChildren();
+    for (const cluster of clusters) {
+      const article = document.createElement('article');
+      article.className = 'cluster';
       const ul = document.createElement('ul');
-      for (const entry of entries) {
+      for (const name of cluster.names) {
         const li = document.createElement('li');
-        li.textContent = entry.via ? `${entry.name} (as ${entry.via})` : entry.name;
+        li.textContent = name;
         ul.append(li);
       }
-      section.append(h3, ul);
-      body.append(section);
-    }
-    if (!anyContent) {
-      const empty = document.createElement('p');
-      empty.className = 'artist-empty';
-      empty.textContent = 'No aliases, groups, members, or related projects found.';
-      body.append(empty);
+      article.append(ul);
+      clustersListEl.append(article);
     }
   }
 
-  function markComplete({ queried = [], errored = [] } = {}) {
-    const parts = [];
-    if (queried.length) {
-      parts.push(`Showing results from ${formatList(queried)}`);
-    } else {
-      parts.push('Done');
-    }
-    if (errored.length) {
-      parts.push(`${formatList(errored)} unavailable`);
-    }
-    status.textContent = parts.join(' \u00b7 ');
-    status.classList.toggle('has-error', errored.length > 0);
-  }
-
-  return { root, renderData, markComplete };
-}
-
-function formatList(items) {
-  if (items.length <= 1) return items.join('');
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
+  return { start, onArtistDone, onArtistComplete, finalize, clear };
 }

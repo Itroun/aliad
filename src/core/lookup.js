@@ -12,27 +12,38 @@ function shouldExpandAlias(alias) {
 export function lookupAll(names, providers, callbacks = {}) {
   const { onProviderResult, onArtistDone, onArtistComplete, signal } = callbacks;
   const unique = dedupeNames(names);
+  const rootKeys = new Set(unique.map(normaliseName).filter(Boolean));
 
-  const queued = providers.map((provider) => ({
-    provider,
-    queue: provider.minIntervalMs
+  const queued = providers.map((provider) => {
+    const queue = provider.minIntervalMs
       ? createQueue({ minIntervalMs: provider.minIntervalMs })
-      : { run: (fn) => fn() },
-  }));
+      : { run: (fn) => fn() };
+    const cache = new Map();
+    const cachedLookup = (name, opts) => {
+      const key = normaliseName(name);
+      if (!key) return { promise: queue.run(() => provider.lookup(name, opts)), cached: false };
+      if (cache.has(key)) return { promise: cache.get(key), cached: true };
+      const promise = queue.run(() => provider.lookup(name, opts));
+      cache.set(key, promise);
+      return { promise, cached: false };
+    };
+    return { provider, cachedLookup };
+  });
 
   return Promise.all(
     unique.map(async (name) => {
       const initialOutcomes = {};
       const perProvider = await Promise.all(
-        queued.map(async ({ provider, queue }) => {
+        queued.map(async ({ provider, cachedLookup }) => {
+          const { promise, cached } = cachedLookup(name, { signal });
           try {
-            const result = await queue.run(() => provider.lookup(name, { signal }));
+            const result = await promise;
             initialOutcomes[provider.name] = { ok: true };
-            onProviderResult?.(name, provider.name, { ok: true, result });
+            onProviderResult?.(name, provider.name, { ok: true, result, cached });
             return result;
           } catch (error) {
             initialOutcomes[provider.name] = { ok: false };
-            onProviderResult?.(name, provider.name, { ok: false, error });
+            onProviderResult?.(name, provider.name, { ok: false, error, cached });
             return null;
           }
         }),
@@ -40,21 +51,22 @@ export function lookupAll(names, providers, callbacks = {}) {
       let merged = mergeResults(...perProvider.filter(Boolean));
       onArtistDone?.(name, merged);
 
-      const expanded = await expandIdentityGraph(name, merged, queued, callbacks);
+      const expanded = await expandIdentityGraph(name, merged, queued, callbacks, rootKeys);
       merged = expanded.merged;
 
       const queried = Object.keys(initialOutcomes).filter((k) => initialOutcomes[k].ok);
       const errored = Object.keys(initialOutcomes).filter((k) => !initialOutcomes[k].ok);
-      onArtistComplete?.(name, merged, { queried, errored });
+      onArtistComplete?.(name, merged, { queried, errored, closure: expanded.closure });
       return { name, merged, closure: expanded.closure };
     }),
   );
 }
 
-async function expandIdentityGraph(artistName, initialMerged, queued, callbacks) {
+async function expandIdentityGraph(artistName, initialMerged, queued, callbacks, rootKeys) {
   const { onArtistDone, onProviderResult, onBudgetExhausted, signal } = callbacks;
+  const ownRootKey = normaliseName(artistName);
   const visited = new Set();
-  visited.add(normaliseName(artistName));
+  visited.add(ownRootKey);
 
   let accumulated = initialMerged;
   const pending = [];
@@ -66,16 +78,32 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks)
     const key = normaliseName(item.name);
     if (!key || visited.has(key)) continue;
     visited.add(key);
+
+    // Another root input's walk covers this identity sub-graph; recording the
+    // name in `visited` is enough for clustering to union the two roots.
+    if (rootKeys?.has(key) && key !== ownRootKey) continue;
+
     budget--;
 
     const perProvider = await Promise.all(
-      queued.map(async ({ provider, queue }) => {
+      queued.map(async ({ provider, cachedLookup }) => {
+        const { promise, cached } = cachedLookup(item.name, { signal });
         try {
-          const result = await queue.run(() => provider.lookup(item.name, { signal }));
-          onProviderResult?.(artistName, provider.name, { ok: true, result, via: item.name });
+          const result = await promise;
+          onProviderResult?.(artistName, provider.name, {
+            ok: true,
+            result,
+            via: item.name,
+            cached,
+          });
           return result;
         } catch (error) {
-          onProviderResult?.(artistName, provider.name, { ok: false, error, via: item.name });
+          onProviderResult?.(artistName, provider.name, {
+            ok: false,
+            error,
+            via: item.name,
+            cached,
+          });
           return null;
         }
       }),

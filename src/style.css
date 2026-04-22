@@ -97,44 +97,56 @@ h1 {
   gap: 1rem;
 }
 
-.artist-card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  padding: 1rem 1.25rem;
+.clusters h2,
+.singletons h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
 }
 
-.artist-card h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.2rem;
-}
-.artist-status {
+.clusters-hint {
   margin: 0 0 0.75rem;
   color: var(--muted);
   font-size: 0.85rem;
 }
-.artist-status.has-error {
-  color: #9a1e1e;
+
+.clusters-list {
+  display: grid;
+  gap: 0.75rem;
 }
 
-.artist-body section {
-  margin-top: 0.75rem;
+.cluster {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
 }
-.artist-body h3 {
-  margin: 0 0 0.25rem;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-.artist-body ul {
+
+.cluster ul,
+.singletons ul {
   margin: 0;
   padding-left: 1.25rem;
 }
-.artist-empty {
+
+.clusters-progress {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.errored-banner {
+  margin-top: 1rem;
+  padding: 0.5rem 0.75rem;
+  background: #fdecec;
+  border: 1px solid #e7b9b9;
+  border-radius: 0.4rem;
+  color: #7a1e1e;
+  font-size: 0.9rem;
+}
+
+.results-empty {
   margin: 0;
   color: var(--muted);
-  font-style: italic;
 }
 
 .dev-probe {
