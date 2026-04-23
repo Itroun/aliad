@@ -162,4 +162,3 @@ function enqueueFromNode(pending, visited, node, viaChain) {
     }
   }
 }
-

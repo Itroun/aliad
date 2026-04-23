@@ -1,6 +1,10 @@
 import { fetchWithRetry } from './fetchWithRetry.js';
 
-export async function fetchJson(url, { signal, fetchFn, sleep } = {}, { providerName, retryOptions } = {}) {
+export async function fetchJson(
+  url,
+  { signal, fetchFn, sleep } = {},
+  { providerName, retryOptions } = {},
+) {
   const result = await fetchWithRetry(
     url,
     { headers: { Accept: 'application/json' } },
