@@ -1,9 +1,8 @@
 import { checkRateLimit, checkDailyCeiling, incrementDailyCeiling } from '../_lib/kvLimit.js';
+import { ALLOWED_MODELS } from '../../src/core/models.js';
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
-// Keep in sync with HAIKU/SONNET in src/core/extract.js — the frontend picks, this guards.
-const ALLOWED_MODELS = ['claude-haiku-4-5', 'claude-sonnet-4-6'];
 const MAX_TOKENS_CAP = 4096;
 const RATE_LIMIT = 20;
 const RATE_WINDOW_SEC = 60;

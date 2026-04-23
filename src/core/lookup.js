@@ -1,4 +1,4 @@
-import { mergeResults, normaliseName } from './merge.js';
+import { dedupeNames, mergeResults, normaliseName } from './merge.js';
 import { createQueue } from './rateLimit.js';
 
 const EXPAND_SKIP_TYPES = new Set(['Search hint', 'Legal name']);
@@ -163,16 +163,3 @@ function enqueueFromNode(pending, visited, node, viaChain) {
   }
 }
 
-function dedupeNames(names) {
-  const seen = new Set();
-  const out = [];
-  for (const raw of names ?? []) {
-    const trimmed = String(raw ?? '').trim();
-    if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(trimmed);
-  }
-  return out;
-}

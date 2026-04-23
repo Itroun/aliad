@@ -1,10 +1,10 @@
 import { emptyResult } from './provider.js';
-import { fetchWithRetry } from '../core/fetchWithRetry.js';
+import { fetchJson } from '../core/fetchJson.js';
 import { normaliseName } from '../core/merge.js';
 
 export const name = 'musicbrainz';
 export const minIntervalMs = 1200;
-export const MIN_SCORE = 90;
+const MIN_SCORE = 90;
 
 const BASE = 'https://musicbrainz.org/ws/2';
 
@@ -47,16 +47,8 @@ const RETRY_OPTIONS = {
   backoffMs: [1000, 3000, 7000, 15000],
 };
 
-async function getJson(url, { signal, fetchFn, sleep }) {
-  const result = await fetchWithRetry(
-    url,
-    { headers: { Accept: 'application/json' } },
-    { fetchFn, signal, sleep, ...RETRY_OPTIONS },
-  );
-  if (!result.ok) {
-    throw new Error(`MusicBrainz ${result.status ?? result.reason} for ${url}`);
-  }
-  return result.response.json();
+function getJson(url, ctx) {
+  return fetchJson(url, ctx, { providerName: 'MusicBrainz', retryOptions: RETRY_OPTIONS });
 }
 
 export function mapDetails(details) {

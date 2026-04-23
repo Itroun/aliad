@@ -2,6 +2,20 @@ import { emptyResult } from '../providers/provider.js';
 
 const BUCKETS = ['aliases', 'groups', 'members', 'relatedProjects'];
 
+export function dedupeNames(names) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of names ?? []) {
+    const trimmed = String(raw ?? '').trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
+}
+
 export function normaliseName(name) {
   return String(name ?? '')
     .toLowerCase()

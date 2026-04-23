@@ -1,8 +1,5 @@
 import { parseLineup } from '../ui/input.js';
-
-// Keep in sync with ALLOWED_MODELS in functions/api/anthropic.js — the proxy enforces.
-const HAIKU = 'claude-haiku-4-5';
-const SONNET = 'claude-sonnet-4-6';
+import { HAIKU, SONNET } from './models.js';
 
 const SYSTEM_PROMPT_TEXT = `You extract artist and performer names from text related to music festivals or events.
 

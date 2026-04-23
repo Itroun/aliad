@@ -1,15 +1,7 @@
+import { dedupeNames } from '../core/merge.js';
+
 export function parseLineup(text) {
-  const seen = new Set();
-  const out = [];
-  for (const raw of String(text ?? '').split('\n')) {
-    const name = raw.trim();
-    if (!name) continue;
-    const key = name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(name);
-  }
-  return out;
+  return dedupeNames(String(text ?? '').split('\n'));
 }
 
 export function createInput({ onSubmit, onCancel }) {
