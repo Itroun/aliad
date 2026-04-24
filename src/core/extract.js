@@ -1,4 +1,4 @@
-import { parseLineup } from '../ui/input.js';
+import { parseLineup } from '../ui/inputScreen.js';
 import { HAIKU, SONNET } from './models.js';
 
 const SYSTEM_PROMPT_TEXT = `You extract artist and performer names from text related to music festivals or events.

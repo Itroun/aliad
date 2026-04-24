@@ -1,6 +1,6 @@
 import './style.css';
-import { createInput } from './ui/input.js';
-import { createResults } from './ui/results.js';
+import { createInputScreen } from './ui/inputScreen.js';
+import { createGraphScreen } from './ui/graphScreen.js';
 import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
 import { detectInputType, extractArtists } from './core/extract.js';
@@ -10,94 +10,90 @@ import * as musicbrainz from './providers/musicbrainz.js';
 import * as discogs from './providers/discogs.js';
 
 const providers = [musicbrainz, discogs];
-
 const app = document.querySelector('#app');
-
-const header = document.createElement('header');
-const h1 = document.createElement('h1');
-h1.textContent = 'aka';
-const tagline = document.createElement('p');
-tagline.className = 'tagline';
-tagline.textContent =
-  'Paste a festival lineup and discover each artist\u2019s aliases, side projects, and group memberships.';
-header.append(h1, tagline);
-
-const resultsEl = document.createElement('div');
-resultsEl.className = 'results';
-
-const results = createResults(resultsEl);
-
-const statusEl = document.createElement('p');
-statusEl.className = 'extraction-status';
-
 const devProbe = createDevProbe();
+if (devProbe.el) document.body.append(devProbe.el);
 
 let activeController = null;
+let currentScreen = null;
+
+function mount(el) {
+  if (currentScreen) currentScreen.remove();
+  currentScreen = el;
+  app.append(el);
+}
 
 function cancelActive() {
   if (activeController) {
     activeController.abort();
     activeController = null;
   }
-  statusEl.textContent = '';
 }
 
-const form = createInput({
-  onCancel: cancelActive,
-  onSubmit: async (input) => {
-    cancelActive();
-    activeController = new AbortController();
-    const signal = activeController.signal;
+function showInput() {
+  cancelActive();
+  devProbe.reset();
+  const screen = createInputScreen({
+    onSubmit: handleSubmit,
+    onCancel: cancelActive,
+  });
+  mount(screen.el);
+}
 
-    results.clear();
-    devProbe.reset();
-    if (input.pasteFormat) devProbe.note(`paste format: ${input.pasteFormat}`);
+async function handleSubmit(input) {
+  cancelActive();
+  activeController = new AbortController();
+  const signal = activeController.signal;
+  devProbe.reset();
+  if (input.pasteFormat) devProbe.note(`paste format: ${input.pasteFormat}`);
 
-    try {
-      const { artists, discoveredAliases } = await resolveInput(input, signal);
-      if (!artists.length) {
-        statusEl.textContent = 'No artist names found.';
-        return;
-      }
-      statusEl.textContent = '';
-
-      const activeProviders = discoveredAliases.length
-        ? [createExtractionProvider(discoveredAliases), ...providers]
-        : providers;
-
-      results.start(artists);
-
-      await lookupAll(artists, activeProviders, {
-        signal,
-        onProviderResult: (artist, provider, outcome) => {
-          if (signal.aborted) return;
-          devProbe.note(formatProviderNote(artist, provider, outcome));
-        },
-        onArtistComplete: (artist, merged, summary) => {
-          if (signal.aborted) return;
-          results.onArtistComplete(artist, merged, summary);
-        },
-        onBudgetExhausted: (artist, info) => {
-          if (signal.aborted) return;
-          devProbe.note(
-            `${artist} \u00b7 expansion budget hit (${info.skipped} aliases not explored)`,
-          );
-        },
-      });
-
-      if (signal.aborted) return;
-      results.finalize();
-    } catch (err) {
-      if (err?.name === 'AbortError') return;
-      if (signal.aborted) return;
-      console.error(err);
-      statusEl.textContent = err.message || 'Something went wrong.';
+  try {
+    const { artists, discoveredAliases } = await resolveInput(input, signal);
+    if (!artists.length) {
+      // Surface the error back on the input screen — re-mount with a banner.
+      showInput();
+      console.warn('No artist names found in input.');
+      return;
     }
-  },
-});
 
-app.append(header, form, statusEl, resultsEl);
-if (devProbe.el) app.append(devProbe.el);
+    const activeProviders = discoveredAliases.length
+      ? [createExtractionProvider(discoveredAliases), ...providers]
+      : providers;
+
+    const graph = createGraphScreen({ lineup: artists, onBack: showInput });
+    mount(graph.el);
+
+    await lookupAll(artists, activeProviders, {
+      signal,
+      onProviderResult: (artist, provider, outcome) => {
+        if (signal.aborted) return;
+        devProbe.note(formatProviderNote(artist, provider, outcome));
+      },
+      onArtistDone: (artist, merged) => {
+        if (signal.aborted) return;
+        graph.onArtistDone(artist, merged);
+      },
+      onArtistComplete: (artist, merged, summary) => {
+        if (signal.aborted) return;
+        graph.onArtistComplete(artist, merged, summary);
+      },
+      onBudgetExhausted: (artist, info) => {
+        if (signal.aborted) return;
+        devProbe.note(`${artist} · expansion budget hit (${info.skipped} aliases not explored)`);
+      },
+    });
+
+    if (signal.aborted) return;
+    graph.finalize();
+  } catch (err) {
+    if (err?.name === 'AbortError' || signal.aborted) return;
+    console.error(err);
+    // Bounce back to input on hard failure.
+    showInput();
+  }
+}
+
+showInput();
 
 function extract(content, type, signal) {
   return extractArtists(content, {
@@ -105,7 +101,7 @@ function extract(content, type, signal) {
     signal,
     onCall: ({ model, inputChars, outputArtists, durationMs }) => {
       devProbe.note(
-        `extract \u00b7 ${model} \u00b7 in=${inputChars}ch \u00b7 out=${outputArtists} artists \u00b7 ${durationMs}ms`,
+        `extract · ${model} · in=${inputChars}ch · out=${outputArtists} artists · ${durationMs}ms`,
       );
     },
   });
@@ -113,12 +109,10 @@ function extract(content, type, signal) {
 
 async function resolveInput(input, signal) {
   if (input.type === 'url') {
-    statusEl.textContent = 'Fetching page\u2026';
     const { kind, body } = await fetchWithFallbacks(input.value, {
       signal,
       onAttempt: devProbe.onAttempt,
     });
-    statusEl.textContent = 'Extracting artist names\u2026';
     return extract(body, kind === 'html' ? 'html' : 'messy-text', signal);
   }
 
@@ -127,7 +121,6 @@ async function resolveInput(input, signal) {
     if (cleaned.trim().length < 20) {
       return resolveText(input.value, signal);
     }
-    statusEl.textContent = 'Extracting artist names from pasted content\u2026';
     return extract(cleaned, 'html', signal);
   }
 
@@ -139,7 +132,6 @@ function resolveText(text, signal) {
   if (inputType === 'clean') {
     return extract(text, 'clean-text', signal);
   }
-  statusEl.textContent = 'Extracting artist names\u2026';
   return extract(text, 'messy-text', signal);
 }
 
@@ -207,13 +199,13 @@ async function callProxy(url, mode, signal) {
 
 function formatProviderNote(artist, provider, outcome) {
   const label = outcome.via ? `${artist} (via ${outcome.via})` : artist;
-  const suffix = outcome.cached ? ' \u00b7 cached' : '';
+  const suffix = outcome.cached ? ' · cached' : '';
   if (!outcome.ok) {
     const reason = outcome.error?.message || 'failed';
-    return `${label} \u00b7 ${provider} \u00b7 error: ${reason}${suffix}`;
+    return `${label} · ${provider} · error: ${reason}${suffix}`;
   }
   const counts = summariseResult(outcome.result);
-  return `${label} \u00b7 ${provider} \u00b7 ${counts || 'no data'}${suffix}`;
+  return `${label} · ${provider} · ${counts || 'no data'}${suffix}`;
 }
 
 function summariseResult(r) {
