@@ -6,7 +6,6 @@ export function createFocusPanel() {
   root.className = 'panel-section panel-connection';
 
   root.innerHTML = `
-    <div class="panel-eyebrow">Connection</div>
     <div class="panel-body"></div>
   `;
 
@@ -19,12 +18,12 @@ export function createFocusPanel() {
   }
 
   function renderPlaceholder() {
-    body.innerHTML = `<div class="panel-placeholder">Click a connection to see who links them.</div>`;
+    body.innerHTML = `<div class="panel-placeholder">Click a cluster to see its connections.</div>`;
   }
 
   function renderEdge(edge) {
     const count = edge.evidence.length;
-    const personWord = count === 1 ? 'person' : 'people';
+    const label = count === 1 ? 'connection' : 'connections';
     const ev = edge.evidence
       .map((e, i) => {
         const hops = e.hops
@@ -56,7 +55,7 @@ export function createFocusPanel() {
       </div>
       <button type="button" class="connection-toggle ${expanded ? 'is-expanded' : ''}">
         <svg class="toggle-caret" width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M1 0l6 4-6 4z"/></svg>
-        <span>Connected by ${count} ${personWord}</span>
+        <span>${count} ${label}</span>
       </button>
       <div class="connection-evidence aka-fadein ${expanded ? 'is-open' : ''}">${ev}</div>
     `;

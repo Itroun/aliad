@@ -19,6 +19,16 @@ const BUCKET_TO_REL = {
   relatedProjects: 'related to',
 };
 
+function relForEntry(bucket, entry) {
+  // Groups/related-projects reached through a member (entry.via set during
+  // identity-graph expansion) are member side-projects, not parent groups
+  // of the root act. Relabel so the evidence row reads honestly.
+  if ((bucket === 'groups' || bucket === 'relatedProjects') && entry?.via) {
+    return 'side project of';
+  }
+  return BUCKET_TO_REL[bucket];
+}
+
 function collectRelations(merged) {
   const rels = new Map();
   for (const bucket of ['aliases', 'members', 'groups', 'relatedProjects']) {
@@ -26,7 +36,11 @@ function collectRelations(merged) {
       const key = normaliseName(entry?.name);
       if (!key) continue;
       if (!rels.has(key)) {
-        rels.set(key, { displayName: entry.name, rel: BUCKET_TO_REL[bucket] });
+        rels.set(key, {
+          displayName: entry.name,
+          rel: relForEntry(bucket, entry),
+          viaKey: normaliseName(entry?.via),
+        });
       }
     }
   }
@@ -75,11 +89,36 @@ function buildEdge(A, B) {
     pushEvidence(aKey, entry.displayName || A.name, [{ rel: entry.rel, with: B.name }]);
   }
 
-  // Bridge identities: present in both A and B's merged buckets.
+  // Person-bridges: shared identities reached via alias/member relations on
+  // either side. These are the "real" connectors between the two acts.
+  const personBridgeKeys = new Set();
   for (const [key, aEntry] of aRels) {
     if (key === aKey || key === bKey) continue;
     const bEntry = bRels.get(key);
     if (!bEntry) continue;
+    if (
+      aEntry.rel === 'member of' ||
+      bEntry.rel === 'member of' ||
+      aEntry.rel === 'aka' ||
+      bEntry.rel === 'aka'
+    ) {
+      personBridgeKeys.add(key);
+    }
+  }
+
+  // Bridge identities: present in both A and B's merged buckets. Skip rows
+  // that are downstream of a person-bridge already listed (e.g. a member's
+  // other band) — they're redundant evidence.
+  for (const [key, aEntry] of aRels) {
+    if (key === aKey || key === bKey) continue;
+    const bEntry = bRels.get(key);
+    if (!bEntry) continue;
+    if (
+      (aEntry.viaKey && personBridgeKeys.has(aEntry.viaKey)) ||
+      (bEntry.viaKey && personBridgeKeys.has(bEntry.viaKey))
+    ) {
+      continue;
+    }
     pushEvidence(key, aEntry.displayName || bEntry.displayName, [
       { rel: aEntry.rel, with: A.name },
       { rel: bEntry.rel, with: B.name },

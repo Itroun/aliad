@@ -3,18 +3,20 @@ import { buildGraph } from '../src/core/graph.js';
 import { normaliseName } from '../src/core/merge.js';
 
 function entry(name, { aliases = [], members = [], groups = [], relatedProjects = [] } = {}) {
+  const toEntry = (n) => (typeof n === 'string' ? { name: n } : { ...n });
   const merged = {
-    aliases: aliases.map((n) => ({ name: n })),
-    members: members.map((n) => ({ name: n })),
-    groups: groups.map((n) => ({ name: n })),
-    relatedProjects: relatedProjects.map((n) => ({ name: n })),
+    aliases: aliases.map(toEntry),
+    members: members.map(toEntry),
+    groups: groups.map(toEntry),
+    relatedProjects: relatedProjects.map(toEntry),
   };
+  const nameOf = (n) => (typeof n === 'string' ? n : n.name);
   const closure = new Set([
     normaliseName(name),
-    ...aliases.map(normaliseName),
-    ...members.map(normaliseName),
-    ...groups.map(normaliseName),
-    ...relatedProjects.map(normaliseName),
+    ...aliases.map(nameOf).map(normaliseName),
+    ...members.map(nameOf).map(normaliseName),
+    ...groups.map(nameOf).map(normaliseName),
+    ...relatedProjects.map(nameOf).map(normaliseName),
   ]);
   return { name, merged, closure };
 }
@@ -125,6 +127,43 @@ describe('buildGraph', () => {
     ];
     const { clusters } = buildGraph(per);
     expect(clusters.map((c) => c.id)).toEqual(['c0', 'c2']);
+  });
+
+  it('drops side-project bridges that are downstream of a person-bridge', () => {
+    // Etnica ↔ Pleiadians, shared member Maurizio. Crop Circles is reached
+    // via Maurizio on both sides — it's redundant evidence.
+    const per = [
+      entry('Etnica', {
+        members: ['Maurizio'],
+        groups: [{ name: 'Crop Circles', via: 'Maurizio' }],
+      }),
+      entry('Pleiadians', {
+        members: ['Maurizio'],
+        groups: [{ name: 'Crop Circles', via: 'Maurizio' }],
+      }),
+    ];
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges[0];
+    expect(edge.evidence.map((e) => e.person)).toEqual(['Maurizio']);
+  });
+
+  it('keeps a side-project bridge when its via person is not itself a bridge', () => {
+    // Budget cutoff scenario: Crop Circles shows up on both sides via
+    // Maurizio, but Maurizio is not in either act's merged member list.
+    const per = [
+      entry('Etnica', { groups: [{ name: 'Crop Circles', via: 'Maurizio' }] }),
+      entry('Pleiadians', { groups: [{ name: 'Crop Circles', via: 'Maurizio' }] }),
+    ];
+    // Force them into the same cluster via shared closure.
+    for (const e of per) e.closure.add('crop circles');
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges[0];
+    const crop = edge.evidence.find((e) => e.person === 'Crop Circles');
+    expect(crop).toBeTruthy();
+    expect(crop.hops).toEqual([
+      { rel: 'side project of', with: 'Etnica' },
+      { rel: 'side project of', with: 'Pleiadians' },
+    ]);
   });
 
   it('drops entries with no usable name', () => {
