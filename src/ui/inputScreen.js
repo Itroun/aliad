@@ -8,13 +8,8 @@ export function parseLineup(text) {
 const EXAMPLE_LINEUP = [
   'Atmos',
   'Battle of the Future Buddhas',
-  'Blue Planet Corporation',
-  'Doof',
-  'Eat Static',
-  'Growling Mad Scientists',
   'Filteria',
   'Ultravibe',
-  '1200mic',
   'Bumbling Loons',
   'Dickster',
   'Etnica',

@@ -79,46 +79,41 @@ function buildEdge(A, B) {
     evidence.push({ person, hops });
   };
 
+  // A "person-bridge" row is a shared identity that appears as a person on
+  // both sides (member-of or aka). When one exists, every via-mediated row —
+  // direct or bridge — is redundant noise: the same connector is already
+  // covered by the person-bridge row, just expressed honestly.
+  const isPersonRel = (rel) => rel === 'member of' || rel === 'aka';
+  let hasPersonBridge = false;
+  for (const [key, aEntry] of aRels) {
+    if (key === aKey || key === bKey) continue;
+    const bEntry = bRels.get(key);
+    if (!bEntry) continue;
+    if (isPersonRel(aEntry.rel) && isPersonRel(bEntry.rel)) {
+      hasPersonBridge = true;
+      break;
+    }
+  }
+
   // Direct relationship: B appears in A's merged (or vice-versa) — one-hop.
-  if (aRels.has(bKey)) {
+  // Suppressed entirely when a person-bridge exists: the people are the more
+  // informative connector, and band-to-band rows ("X aka Y") are redundant
+  // when we can already point at the specific shared members.
+  if (aRels.has(bKey) && !hasPersonBridge) {
     const entry = aRels.get(bKey);
     pushEvidence(bKey, entry.displayName || B.name, [{ rel: entry.rel, with: A.name }]);
   }
-  if (bRels.has(aKey) && !seenPersons.has(aKey)) {
+  if (bRels.has(aKey) && !hasPersonBridge && !seenPersons.has(aKey)) {
     const entry = bRels.get(aKey);
     pushEvidence(aKey, entry.displayName || A.name, [{ rel: entry.rel, with: B.name }]);
   }
 
-  // Person-bridges: shared identities reached via alias/member relations on
-  // either side. These are the "real" connectors between the two acts.
-  const personBridgeKeys = new Set();
+  // Bridge identities present in both A and B's merged buckets.
   for (const [key, aEntry] of aRels) {
     if (key === aKey || key === bKey) continue;
     const bEntry = bRels.get(key);
     if (!bEntry) continue;
-    if (
-      aEntry.rel === 'member of' ||
-      bEntry.rel === 'member of' ||
-      aEntry.rel === 'aka' ||
-      bEntry.rel === 'aka'
-    ) {
-      personBridgeKeys.add(key);
-    }
-  }
-
-  // Bridge identities: present in both A and B's merged buckets. Skip rows
-  // that are downstream of a person-bridge already listed (e.g. a member's
-  // other band) — they're redundant evidence.
-  for (const [key, aEntry] of aRels) {
-    if (key === aKey || key === bKey) continue;
-    const bEntry = bRels.get(key);
-    if (!bEntry) continue;
-    if (
-      (aEntry.viaKey && personBridgeKeys.has(aEntry.viaKey)) ||
-      (bEntry.viaKey && personBridgeKeys.has(bEntry.viaKey))
-    ) {
-      continue;
-    }
+    if ((aEntry.viaKey || bEntry.viaKey) && hasPersonBridge) continue;
     pushEvidence(key, aEntry.displayName || bEntry.displayName, [
       { rel: aEntry.rel, with: A.name },
       { rel: bEntry.rel, with: B.name },

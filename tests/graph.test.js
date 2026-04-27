@@ -166,6 +166,75 @@ describe('buildGraph', () => {
     ]);
   });
 
+  it('drops direct aka rows when a person-bridge already explains the edge', () => {
+    // Etnica and Pleiadians are listed as aliases of each other AND share
+    // four members. The shared-members rows are the informative explanation;
+    // the band-to-band aka rows are noise.
+    const per = [
+      entry('Etnica', { aliases: ['Pleiadians'], members: ['Maurizio', 'Max'] }),
+      entry('Pleiadians', { aliases: ['Etnica'], members: ['Maurizio', 'Max'] }),
+    ];
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges[0];
+    expect(edge.evidence.map((e) => e.person)).toEqual(['Maurizio', 'Max']);
+  });
+
+  it('keeps a direct aka row when no person-bridge explains the edge', () => {
+    // Pure alias relationship with no shared members surfaced — the aka row
+    // is the only evidence we have, so it must stay.
+    const per = [entry('Aphex Twin', { aliases: ['Polygon Window'] }), entry('Polygon Window')];
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges[0];
+    expect(edge.evidence.length).toBeGreaterThan(0);
+    expect(edge.evidence[0].hops[0].rel).toBe('aka');
+  });
+
+  it('drops a direct via-mediated relation when a person-bridge already explains the edge', () => {
+    // Bumbling Loons ↔ Green Nuns: each band shows up in the other's `groups`
+    // bucket via Dick Trevor (a member of both). The Dick Trevor row covers
+    // the connection; the via-mediated direct rows are misleading noise
+    // ("X · side project of → Y" when really they share a member).
+    const per = [
+      entry('Bumbling Loons', {
+        members: ['Dick Trevor'],
+        groups: [{ name: 'Green Nuns of the Revolution', via: 'Dick Trevor' }],
+      }),
+      entry('Green Nuns of the Revolution', {
+        members: ['Dick Trevor'],
+        groups: [{ name: 'Bumbling Loons', via: 'Dick Trevor' }],
+      }),
+    ];
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges[0];
+    expect(edge.evidence.map((e) => e.person)).toEqual(['Dick Trevor']);
+  });
+
+  it('drops via-mediated bridges even when via-keys differ from the person-bridge name', () => {
+    // Real-world drift: a member shows up under one display name as a member
+    // (Dick Trevor) but their side-projects are credited under another name
+    // (Richard Trevor / Muttley). The presence of *any* person-bridge row
+    // should still suppress those via-mediated bridges.
+    const per = [
+      entry('Bumbling Loons', {
+        members: ['Dick Trevor'],
+        relatedProjects: [
+          { name: 'Baguette Quartette', via: 'Richard Trevor' },
+          { name: 'Citywide', via: 'Muttley' },
+        ],
+      }),
+      entry('Green Nuns of the Revolution', {
+        members: ['Dick Trevor'],
+        relatedProjects: [
+          { name: 'Baguette Quartette', via: 'Richard Trevor' },
+          { name: 'Citywide', via: 'Muttley' },
+        ],
+      }),
+    ];
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges[0];
+    expect(edge.evidence.map((e) => e.person)).toEqual(['Dick Trevor']);
+  });
+
   it('drops entries with no usable name', () => {
     const per = [entry(''), entry('Real'), { name: null }];
     const { singletons } = buildGraph(per);
