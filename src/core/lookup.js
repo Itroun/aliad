@@ -70,7 +70,10 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
 
   let accumulated = initialMerged;
   const pending = [];
-  enqueueFromNode(pending, visited, initialMerged, [], rootKeys);
+  enqueueFromNode(pending, visited, initialMerged, [], rootKeys, {
+    parentKind: null,
+    viaHadMemberStep: false,
+  });
   let budget = MAX_EXPANSION_LOOKUPS;
 
   while (pending.length > 0 && budget > 0) {
@@ -110,20 +113,39 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
     );
 
     const nodeMerged = mergeResults(...perProvider.filter(Boolean));
+
+    // Suspected alias-of-group: a previous node listed `item.name` as an alias,
+    // but the lookup reveals it has its own membership. Treat it as a group,
+    // not as an identity-equivalent of the root. Skip attribution and don't
+    // fan into co-members — otherwise collaborators leak in as apparent
+    // aliases of the root (e.g. Discogs lists a duo's project as an alias of
+    // each member, and walking that node's members swaps the two members).
+    const looksLikeGroup = (nodeMerged.members ?? []).length > 0;
+    if (item.kind === 'alias' && looksLikeGroup) continue;
+
     const viaChain = [item.name, ...item.viaChain];
     const via = item.name;
+    const viaHadMemberStep = !!item.viaHadMemberStep;
 
     const attributed = {
       aliases: [],
-      groups: nodeMerged.groups.map((e) => ({ ...e, via, viaChain })),
-      members: nodeMerged.members.map((e) => ({ ...e, via, viaChain })),
-      relatedProjects: nodeMerged.relatedProjects.map((e) => ({ ...e, via, viaChain })),
+      groups: nodeMerged.groups.map((e) => ({ ...e, via, viaChain, viaHadMemberStep })),
+      members: nodeMerged.members.map((e) => ({ ...e, via, viaChain, viaHadMemberStep })),
+      relatedProjects: nodeMerged.relatedProjects.map((e) => ({
+        ...e,
+        via,
+        viaChain,
+        viaHadMemberStep,
+      })),
     };
 
     accumulated = mergeResults(accumulated, attributed);
     onArtistDone?.(artistName, accumulated);
 
-    enqueueFromNode(pending, visited, nodeMerged, viaChain, rootKeys);
+    enqueueFromNode(pending, visited, nodeMerged, viaChain, rootKeys, {
+      parentKind: item.kind,
+      viaHadMemberStep,
+    });
   }
 
   if (budget === 0 && pending.length > 0) {
@@ -133,7 +155,8 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
   return { merged: accumulated, closure: visited };
 }
 
-function enqueueFromNode(pending, visited, node, viaChain, rootKeys) {
+function enqueueFromNode(pending, visited, node, viaChain, rootKeys, ctx = {}) {
+  const { parentKind = null, viaHadMemberStep = false } = ctx;
   const walkableAliases = (node.aliases ?? []).filter(shouldExpandAlias);
   if (walkableAliases.length > ALIAS_FANOUT_CAP) {
     // Prolific-artist cap: register names in the closure so lineup matches
@@ -148,17 +171,17 @@ function enqueueFromNode(pending, visited, node, viaChain, rootKeys) {
     for (const alias of walkableAliases) {
       const key = normaliseName(alias?.name);
       if (!key || visited.has(key)) continue;
-      pending.push({ name: alias.name, viaChain });
+      pending.push({ name: alias.name, viaChain, kind: 'alias', viaHadMemberStep });
     }
   }
-  // Follow members only when the node is itself a group — i.e. has any members.
-  // This captures group-to-group-via-shared-person overlaps while avoiding
-  // person-to-collaborator fan-out that would drift from identity equivalence.
-  if ((node.members ?? []).length > 0) {
+  // Follow members only when the node is itself a group AND we did not arrive
+  // here via an alias hop. Walking members of an alias-reached node would turn
+  // co-collaborators into apparent aliases of the root identity.
+  if (parentKind !== 'alias' && (node.members ?? []).length > 0) {
     for (const member of node.members) {
       const key = normaliseName(member?.name);
       if (!key || visited.has(key)) continue;
-      pending.push({ name: member.name, viaChain });
+      pending.push({ name: member.name, viaChain, kind: 'member', viaHadMemberStep: true });
     }
   }
   // Don't walk groups/relatedProjects in general (would fan out across every
@@ -170,7 +193,7 @@ function enqueueFromNode(pending, visited, node, viaChain, rootKeys) {
       for (const entry of bucket ?? []) {
         const key = normaliseName(entry?.name);
         if (!key || visited.has(key) || !rootKeys.has(key)) continue;
-        pending.push({ name: entry.name, viaChain });
+        pending.push({ name: entry.name, viaChain, kind: 'alias', viaHadMemberStep });
       }
     }
   }

@@ -320,20 +320,23 @@ describe('lookupAll', () => {
   });
 
   it('records a multi-hop via chain', async () => {
+    // Member→alias chain: a group has Member1, who has an alias Member1Alias,
+    // whose lookup surfaces another group. This direction (member then alias)
+    // is fine; it is alias→member that gets blocked.
     const p = stubProvider('p', {
       GroupA: {
-        aliases: [{ name: 'GroupA-Alias' }],
-        groups: [],
-        members: [],
-        relatedProjects: [],
-      },
-      'GroupA-Alias': {
         aliases: [],
         groups: [],
         members: [{ name: 'Member1' }],
         relatedProjects: [],
       },
       Member1: {
+        aliases: [{ name: 'Member1Alias' }],
+        groups: [],
+        members: [],
+        relatedProjects: [],
+      },
+      Member1Alias: {
         aliases: [],
         groups: [{ name: 'OtherGroup' }],
         members: [],
@@ -344,8 +347,71 @@ describe('lookupAll', () => {
     const results = await lookupAll(['GroupA'], [p]);
     const other = results[0].merged.groups.find((g) => g.name === 'OtherGroup');
     expect(other).toBeTruthy();
-    expect(other.via).toBe('Member1');
-    expect(other.viaChain).toEqual(['Member1', 'GroupA-Alias']);
+    expect(other.via).toBe('Member1Alias');
+    expect(other.viaChain).toEqual(['Member1Alias', 'Member1']);
+    expect(other.viaHadMemberStep).toBe(true);
+  });
+
+  it('does not fan into co-members when an alias resolves to a group', async () => {
+    // The Mark Allen / Hopefiend / William Bryan Halsey case: Discogs lists
+    // Hopefiend as an alias of Mark Allen, but it is actually a duo. Walking
+    // its members would pull WBH (the other duo member) into Mark Allen's
+    // identity graph and falsely attribute WBH's solo projects to Mark Allen.
+    const p = stubProvider('p', {
+      'Mark Allen': {
+        aliases: [{ name: 'Hopefiend' }],
+        groups: [],
+        members: [],
+        relatedProjects: [],
+      },
+      Hopefiend: {
+        aliases: [],
+        groups: [],
+        members: [{ name: 'Mark Allen' }, { name: 'William Bryan Halsey' }],
+        relatedProjects: [],
+      },
+      'William Bryan Halsey': {
+        aliases: [],
+        groups: [{ name: 'Ultravibe' }],
+        members: [],
+        relatedProjects: [],
+      },
+    });
+
+    const results = await lookupAll(['Mark Allen'], [p]);
+    const groupNames = results[0].merged.groups.map((g) => g.name);
+    expect(groupNames).not.toContain('Ultravibe');
+    expect(results[0].closure.has('william bryan halsey')).toBe(false);
+  });
+
+  it('still walks members of a group root (one alias hop allowed downstream)', async () => {
+    // Shpongle (root group) → Raja Ram (member) → Hallucinogen (alias) →
+    // groups → The Infinity Project. The member-then-alias direction stays
+    // open so this multi-hop case still surfaces.
+    const p = stubProvider('p', {
+      Shpongle: {
+        aliases: [],
+        groups: [],
+        members: [{ name: 'Raja Ram' }],
+        relatedProjects: [],
+      },
+      'Raja Ram': {
+        aliases: [{ name: 'Ronald Rothfield' }],
+        groups: [],
+        members: [],
+        relatedProjects: [],
+      },
+      'Ronald Rothfield': {
+        aliases: [],
+        groups: [{ name: 'The Infinity Project' }],
+        members: [],
+        relatedProjects: [],
+      },
+    });
+    const results = await lookupAll(['Shpongle'], [p]);
+    const tip = results[0].merged.groups.find((g) => g.name === 'The Infinity Project');
+    expect(tip).toBeTruthy();
+    expect(tip.viaHadMemberStep).toBe(true);
   });
 
   it('caps alias fan-out: registers names in closure without walking them', async () => {

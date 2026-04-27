@@ -151,8 +151,12 @@ describe('buildGraph', () => {
     // Budget cutoff scenario: Crop Circles shows up on both sides via
     // Maurizio, but Maurizio is not in either act's merged member list.
     const per = [
-      entry('Etnica', { groups: [{ name: 'Crop Circles', via: 'Maurizio' }] }),
-      entry('Pleiadians', { groups: [{ name: 'Crop Circles', via: 'Maurizio' }] }),
+      entry('Etnica', {
+        groups: [{ name: 'Crop Circles', via: 'Maurizio', viaHadMemberStep: true }],
+      }),
+      entry('Pleiadians', {
+        groups: [{ name: 'Crop Circles', via: 'Maurizio', viaHadMemberStep: true }],
+      }),
     ];
     // Force them into the same cluster via shared closure.
     for (const e of per) e.closure.add('crop circles');
@@ -233,6 +237,22 @@ describe('buildGraph', () => {
     const { clusters } = buildGraph(per);
     const edge = clusters[0].edges[0];
     expect(edge.evidence.map((e) => e.person)).toEqual(['Dick Trevor']);
+  });
+
+  it('labels alias-only via-chains as "member of" rather than "side project of"', () => {
+    // Filteria → (alias) Jannis Tzikas → (his groups) Ultravibe.
+    // No member step in the chain, so Filteria really is a member of
+    // Ultravibe — under another name.
+    const per = [
+      entry('Filteria', {
+        groups: [{ name: 'Ultravibe', via: 'Jannis Tzikas', viaHadMemberStep: false }],
+      }),
+      entry('Ultravibe'),
+    ];
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges[0];
+    const ultravibe = edge.evidence.find((e) => e.person === 'Ultravibe');
+    expect(ultravibe.hops[0].rel).toBe('member of');
   });
 
   it('drops entries with no usable name', () => {

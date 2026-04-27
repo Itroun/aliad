@@ -20,11 +20,12 @@ const BUCKET_TO_REL = {
 };
 
 function relForEntry(bucket, entry) {
-  // Groups/related-projects reached through a member (entry.via set during
-  // identity-graph expansion) are member side-projects, not parent groups
-  // of the root act. Relabel so the evidence row reads honestly.
+  // Via-mediated groups/related-projects: the framing depends on how we got
+  // there. An alias-only chain means the root really is a member of the
+  // group (just under another name) — say so. A chain that took a member
+  // step is a side-project of someone in the group, not the root itself.
   if ((bucket === 'groups' || bucket === 'relatedProjects') && entry?.via) {
-    return 'side project of';
+    return entry.viaHadMemberStep ? 'side project of' : 'member of';
   }
   return BUCKET_TO_REL[bucket];
 }
