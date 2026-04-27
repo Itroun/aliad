@@ -498,6 +498,64 @@ describe('lookupAll', () => {
     expect(a.closure.has('b')).toBe(true);
   });
 
+  it('clusters via group-of-alias when the group is a lineup root', async () => {
+    // Filteria → alias Jannis Tzikas → his groups list Ultravibe.
+    // Ultravibe doesn't list Jannis directly as a member, so the only path
+    // is through the alias-then-group chain. Filteria's closure must still
+    // pick up Ultravibe so clustering can union them.
+    const p = stubProvider('p', {
+      Filteria: {
+        aliases: [{ name: 'Jannis Tzikas' }],
+        groups: [],
+        members: [],
+        relatedProjects: [],
+      },
+      'Jannis Tzikas': {
+        aliases: [],
+        groups: [{ name: 'Ultravibe' }],
+        members: [],
+        relatedProjects: [],
+      },
+      Ultravibe: { aliases: [], groups: [], members: [], relatedProjects: [] },
+    });
+
+    const results = await lookupAll(['Filteria', 'Ultravibe'], [p]);
+    const f = results.find((r) => r.name === 'Filteria');
+    expect(f.closure.has('ultravibe')).toBe(true);
+  });
+
+  it('does not walk into non-root groups during expansion', async () => {
+    // Mirror of the above, but Ultravibe is NOT a lineup root. We must not
+    // enqueue it (would explode budget on prolific session musicians).
+    const calls = [];
+    const p = {
+      name: 'p',
+      async lookup(name) {
+        calls.push(name);
+        if (name === 'Filteria') {
+          return {
+            aliases: [{ name: 'Jannis Tzikas' }],
+            groups: [],
+            members: [],
+            relatedProjects: [],
+          };
+        }
+        if (name === 'Jannis Tzikas') {
+          return {
+            aliases: [],
+            groups: [{ name: 'Ultravibe' }],
+            members: [],
+            relatedProjects: [],
+          };
+        }
+        return { aliases: [], groups: [], members: [], relatedProjects: [] };
+      },
+    };
+
+    await lookupAll(['Filteria'], [p]);
+    expect(calls).not.toContain('Ultravibe');
+  });
+
   it('still clusters transitively across roots even with root-skip', async () => {
     // A -> B (root), B -> C (root), C stands alone. Clustering union over
     // closures should still join all three.

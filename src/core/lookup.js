@@ -70,7 +70,7 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
 
   let accumulated = initialMerged;
   const pending = [];
-  enqueueFromNode(pending, visited, initialMerged, []);
+  enqueueFromNode(pending, visited, initialMerged, [], rootKeys);
   let budget = MAX_EXPANSION_LOOKUPS;
 
   while (pending.length > 0 && budget > 0) {
@@ -123,7 +123,7 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
     accumulated = mergeResults(accumulated, attributed);
     onArtistDone?.(artistName, accumulated);
 
-    enqueueFromNode(pending, visited, nodeMerged, viaChain);
+    enqueueFromNode(pending, visited, nodeMerged, viaChain, rootKeys);
   }
 
   if (budget === 0 && pending.length > 0) {
@@ -133,7 +133,7 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
   return { merged: accumulated, closure: visited };
 }
 
-function enqueueFromNode(pending, visited, node, viaChain) {
+function enqueueFromNode(pending, visited, node, viaChain, rootKeys) {
   const walkableAliases = (node.aliases ?? []).filter(shouldExpandAlias);
   if (walkableAliases.length > ALIAS_FANOUT_CAP) {
     // Prolific-artist cap: register names in the closure so lineup matches
@@ -159,6 +159,19 @@ function enqueueFromNode(pending, visited, node, viaChain) {
       const key = normaliseName(member?.name);
       if (!key || visited.has(key)) continue;
       pending.push({ name: member.name, viaChain });
+    }
+  }
+  // Don't walk groups/relatedProjects in general (would fan out across every
+  // session credit a prolific person has), but if one is itself a lineup root
+  // we want it in the closure — enqueueing lets the root-skip rule register
+  // it in `visited` without spending budget on a redundant lookup.
+  if (rootKeys) {
+    for (const bucket of [node.groups, node.relatedProjects]) {
+      for (const entry of bucket ?? []) {
+        const key = normaliseName(entry?.name);
+        if (!key || visited.has(key) || !rootKeys.has(key)) continue;
+        pending.push({ name: entry.name, viaChain });
+      }
     }
   }
 }

@@ -10,11 +10,16 @@ const EXAMPLE_LINEUP = [
   'Battle of the Future Buddhas',
   'Filteria',
   'Ultravibe',
-  'Bumbling Loons',
-  'Dickster',
-  'Etnica',
-  'Green Nuns of the Revolution',
-  'Pleiadians',
+  'Moon Beasts',
+  'Proxeeus',
+  'DOOF',
+  'The Infinity Project VS Excess Head',
+  'Process',
+  'Mark Allen',
+  'Skizologic vc Filteria',
+  'Cosmosis VS Laughing Buddha',
+  'Psychaos',
+  'Growling Mad Scientists',
 ].join('\n');
 
 export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
