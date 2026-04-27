@@ -1,6 +1,7 @@
 import './style.css';
 import { createInputScreen } from './ui/inputScreen.js';
 import { createGraphScreen } from './ui/graphScreen.js';
+import { createEmptyGraphScreen } from './ui/emptyGraphScreen.js';
 import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
 import { detectInputType, extractArtists } from './core/extract.js';
@@ -15,13 +16,19 @@ const devProbe = createDevProbe();
 if (devProbe.el) document.body.append(devProbe.el);
 
 let activeController = null;
-let currentScreen = null;
+let activeView = 'input';
+let graphScreen = null;
 
-function mount(el) {
-  if (currentScreen) currentScreen.remove();
-  currentScreen = el;
-  app.append(el);
-}
+const inputScreen = createInputScreen({
+  onSubmit: handleSubmit,
+  onCancel: cancelActive,
+  onViewChange: setView,
+});
+const emptyGraphScreen = createEmptyGraphScreen({ onViewChange: setView });
+
+app.append(inputScreen.el);
+app.append(emptyGraphScreen.el);
+applyViewVisibility();
 
 function cancelActive() {
   if (activeController) {
@@ -30,14 +37,32 @@ function cancelActive() {
   }
 }
 
-function showInput() {
-  cancelActive();
-  devProbe.reset();
-  const screen = createInputScreen({
-    onSubmit: handleSubmit,
-    onCancel: cancelActive,
-  });
-  mount(screen.el);
+function setView(view) {
+  if (view !== 'input' && view !== 'graph') return;
+  activeView = view;
+  applyViewVisibility();
+}
+
+function applyViewVisibility() {
+  inputScreen.el.hidden = activeView !== 'input';
+  inputScreen.setActiveView(activeView);
+
+  emptyGraphScreen.el.hidden = !!graphScreen || activeView !== 'graph';
+  if (graphScreen) graphScreen.el.hidden = activeView !== 'graph';
+  graphScreen?.setActiveView?.(activeView);
+  emptyGraphScreen.setActiveView(activeView);
+}
+
+function replaceGraphScreen(next) {
+  if (graphScreen) {
+    graphScreen.el.remove();
+    graphScreen = null;
+  }
+  if (next) {
+    graphScreen = next;
+    app.append(graphScreen.el);
+  }
+  applyViewVisibility();
 }
 
 async function handleSubmit(input) {
@@ -50,8 +75,7 @@ async function handleSubmit(input) {
   try {
     const { artists, discoveredAliases } = await resolveInput(input, signal);
     if (!artists.length) {
-      // Surface the error back on the input screen — re-mount with a banner.
-      showInput();
+      setView('input');
       console.warn('No artist names found in input.');
       return;
     }
@@ -60,8 +84,9 @@ async function handleSubmit(input) {
       ? [createExtractionProvider(discoveredAliases), ...providers]
       : providers;
 
-    const graph = createGraphScreen({ lineup: artists, onBack: showInput });
-    mount(graph.el);
+    const graph = createGraphScreen({ lineup: artists, onViewChange: setView });
+    replaceGraphScreen(graph);
+    setView('graph');
 
     await lookupAll(artists, activeProviders, {
       signal,
@@ -88,12 +113,9 @@ async function handleSubmit(input) {
   } catch (err) {
     if (err?.name === 'AbortError' || signal.aborted) return;
     console.error(err);
-    // Bounce back to input on hard failure.
-    showInput();
+    setView('input');
   }
 }
-
-showInput();
 
 function extract(content, type, signal) {
   return extractArtists(content, {

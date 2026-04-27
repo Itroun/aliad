@@ -3,20 +3,19 @@ import { diffGraph } from './graph/eventStream.js';
 import { createLayout } from './graph/layout.js';
 import { createGraphPane } from './graph/render.js';
 import { createFocusPanel } from './graph/focusPanel.js';
+import { createViewTabs } from './viewTabs.js';
 
-export function createGraphScreen({ lineup, onBack }) {
+export function createGraphScreen({ lineup, onViewChange }) {
   const root = document.createElement('div');
   root.className = 'screen screen-graph';
   root.innerHTML = `
     <div class="grid-bg"></div>
     <header class="topbar">
       <div class="wordmark">
-        <button type="button" class="back-btn" title="New lineup">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 2L3 7l6 5"/></svg>
-        </button>
         <span class="wordmark-logo">aka</span>
         <span class="wordmark-tagline">Lineup identity graph</span>
       </div>
+      <div class="topbar-tabs"></div>
       <div class="topbar-center">
         <span class="resolving-indicator">
           <span class="resolving-dot"></span>
@@ -44,9 +43,10 @@ export function createGraphScreen({ lineup, onBack }) {
   const progressCounter = root.querySelector('.progress-counter');
   const progressFill = root.querySelector('.progress-fill');
   const resolvingIndicator = root.querySelector('.resolving-indicator');
-  const backBtn = root.querySelector('.back-btn');
 
-  backBtn.addEventListener('click', () => onBack?.());
+  const tabs = createViewTabs({ onChange: (v) => onViewChange?.(v) });
+  tabs.setActive('graph');
+  root.querySelector('.topbar-tabs').append(tabs.el);
 
   const pane = createGraphPane();
   graphRegion.append(pane.el);
@@ -189,5 +189,6 @@ export function createGraphScreen({ lineup, onBack }) {
     onArtistComplete,
     onArtistDone,
     finalize,
+    setActiveView: tabs.setActive,
   };
 }

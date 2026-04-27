@@ -1,4 +1,5 @@
 import { dedupeNames } from '../core/merge.js';
+import { createViewTabs } from './viewTabs.js';
 
 export function parseLineup(text) {
   return dedupeNames(String(text ?? '').split('\n'));
@@ -21,7 +22,7 @@ const EXAMPLE_LINEUP = [
   'Pleiadians',
 ].join('\n');
 
-export function createInputScreen({ onSubmit, onCancel } = {}) {
+export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   const root = document.createElement('div');
   root.className = 'screen screen-input';
 
@@ -32,6 +33,7 @@ export function createInputScreen({ onSubmit, onCancel } = {}) {
         <span class="wordmark-logo">aka</span>
         <span class="wordmark-tagline">Lineup identity graph</span>
       </div>
+      <div class="topbar-tabs"></div>
     </header>
     <main class="input-main">
       <div class="input-hero">
@@ -168,5 +170,9 @@ export function createInputScreen({ onSubmit, onCancel } = {}) {
     }
   });
 
-  return { el: root };
+  const tabs = createViewTabs({ onChange: (v) => onViewChange?.(v) });
+  tabs.setActive('input');
+  root.querySelector('.topbar-tabs').append(tabs.el);
+
+  return { el: root, setActiveView: tabs.setActive };
 }
