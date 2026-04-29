@@ -239,20 +239,70 @@ describe('buildGraph', () => {
     expect(edge.evidence.map((e) => e.person)).toEqual(['Dick Trevor']);
   });
 
-  it('labels alias-only via-chains as "member of" rather than "side project of"', () => {
+  it('renders alias-only via-chains as a 2-hop row through the via person', () => {
     // Filteria → (alias) Jannis Tzikas → (his groups) Ultravibe.
-    // No member step in the chain, so Filteria really is a member of
-    // Ultravibe — under another name.
+    // The connection should read "Jannis Tzikas, aka Filteria, member of
+    // Ultravibe", not the misleading single-hop "Ultravibe member of Filteria".
     const per = [
       entry('Filteria', {
+        aliases: ['Jannis Tzikas'],
         groups: [{ name: 'Ultravibe', via: 'Jannis Tzikas', viaHadMemberStep: false }],
       }),
       entry('Ultravibe'),
     ];
     const { clusters } = buildGraph(per);
     const edge = clusters[0].edges[0];
-    const ultravibe = edge.evidence.find((e) => e.person === 'Ultravibe');
-    expect(ultravibe.hops[0].rel).toBe('member of');
+    const jannis = edge.evidence.find((e) => e.person === 'Jannis Tzikas');
+    expect(jannis).toBeTruthy();
+    expect(jannis.hops).toEqual([
+      { rel: 'aka', with: 'Filteria' },
+      { rel: 'member of', with: 'Ultravibe' },
+    ]);
+  });
+
+  it('renders member-step via-chains as a 2-hop row through the member', () => {
+    // Cosmosis → (member) Bill Halsey → (his groups) Ultravibe.
+    // Should read "Bill Halsey, member of Cosmosis, member of Ultravibe".
+    const per = [
+      entry('Cosmosis', {
+        members: ['Bill Halsey'],
+        groups: [{ name: 'Ultravibe', via: 'Bill Halsey', viaHadMemberStep: true }],
+      }),
+      entry('Ultravibe'),
+    ];
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges[0];
+    const bill = edge.evidence.find((e) => e.person === 'Bill Halsey');
+    expect(bill).toBeTruthy();
+    expect(bill.hops).toEqual([
+      { rel: 'member of', with: 'Cosmosis' },
+      { rel: 'member of', with: 'Ultravibe' },
+    ]);
+  });
+
+  it('drops a bridge where each side reached the shared name through a different via person', () => {
+    // Filteria → Jannis Tzikas → Ultravibe; Cosmosis → Bill Halsey → Ultravibe.
+    // The two acts share a connection *to* Ultravibe but not *to each other*;
+    // emitting an edge between them via Ultravibe is misleading.
+    const per = [
+      entry('Filteria', {
+        aliases: ['Jannis Tzikas'],
+        groups: [{ name: 'Ultravibe', via: 'Jannis Tzikas', viaHadMemberStep: false }],
+      }),
+      entry('Cosmosis', {
+        members: ['Bill Halsey'],
+        groups: [{ name: 'Ultravibe', via: 'Bill Halsey', viaHadMemberStep: true }],
+      }),
+    ];
+    // Force them into the same cluster via shared closure on the third act.
+    for (const e of per) e.closure.add('ultravibe');
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges.find(
+      (e) =>
+        (e.a === 'Filteria' && e.b === 'Cosmosis') ||
+        (e.a === 'Cosmosis' && e.b === 'Filteria'),
+    );
+    expect(edge).toBeUndefined();
   });
 
   it('drops entries with no usable name', () => {
