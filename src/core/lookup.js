@@ -75,6 +75,7 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
     viaHadMemberStep: false,
   });
   let budget = MAX_EXPANSION_LOOKUPS;
+  const rejectedAliasKeys = new Set();
 
   while (pending.length > 0 && budget > 0) {
     const item = pending.shift();
@@ -121,7 +122,14 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
     // aliases of the root (e.g. Discogs lists a duo's project as an alias of
     // each member, and walking that node's members swaps the two members).
     const looksLikeGroup = (nodeMerged.members ?? []).length > 0;
-    if (item.kind === 'alias' && looksLikeGroup) continue;
+    if (item.kind === 'alias' && looksLikeGroup) {
+      // Also strip from accumulated.aliases so downstream graph-build doesn't
+      // treat this name as an aka of the root (e.g. a duo project listed as
+      // an alias of one member would otherwise bridge the member to the
+      // duo's other collaborator's bands as "aka <duo project>").
+      rejectedAliasKeys.add(key);
+      continue;
+    }
 
     const viaChain = [item.name, ...item.viaChain];
     const via = item.name;
@@ -150,6 +158,15 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
 
   if (budget === 0 && pending.length > 0) {
     onBudgetExhausted?.(artistName, { skipped: pending.length });
+  }
+
+  if (rejectedAliasKeys.size > 0) {
+    accumulated = {
+      ...accumulated,
+      aliases: accumulated.aliases.filter(
+        (a) => !rejectedAliasKeys.has(normaliseName(a?.name)),
+      ),
+    };
   }
 
   return { merged: accumulated, closure: visited };

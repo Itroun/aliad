@@ -382,6 +382,10 @@ describe('lookupAll', () => {
     const groupNames = results[0].merged.groups.map((g) => g.name);
     expect(groupNames).not.toContain('Ultravibe');
     expect(results[0].closure.has('william bryan halsey')).toBe(false);
+    // The alias is also stripped so it can't bridge to other lineup acts via
+    // the shared duo-project name.
+    const aliasNames = results[0].merged.aliases.map((a) => a.name);
+    expect(aliasNames).not.toContain('Hopefiend');
   });
 
   it('still walks members of a group root (one alias hop allowed downstream)', async () => {
