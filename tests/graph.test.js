@@ -299,8 +299,7 @@ describe('buildGraph', () => {
     const { clusters } = buildGraph(per);
     const edge = clusters[0].edges.find(
       (e) =>
-        (e.a === 'Filteria' && e.b === 'Cosmosis') ||
-        (e.a === 'Cosmosis' && e.b === 'Filteria'),
+        (e.a === 'Filteria' && e.b === 'Cosmosis') || (e.a === 'Cosmosis' && e.b === 'Filteria'),
     );
     expect(edge).toBeUndefined();
   });

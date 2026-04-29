@@ -736,10 +736,7 @@ describe('splitCollab', () => {
   });
 
   it('keeps "&" intact when "vs" also present (vs takes priority)', () => {
-    expect(splitCollab('Drop & Dash vs Germinator')).toEqual([
-      'Drop & Dash',
-      'Germinator',
-    ]);
+    expect(splitCollab('Drop & Dash vs Germinator')).toEqual(['Drop & Dash', 'Germinator']);
   });
 
   it('returns null for non-collab names', () => {

@@ -116,9 +116,7 @@ function buildEdge(A, B) {
         { rel: groupBucketRel(entry), with: otherName },
       ]);
     } else {
-      pushEvidence(otherKey, entry.displayName || otherName, [
-        { rel: entry.rel, with: root },
-      ]);
+      pushEvidence(otherKey, entry.displayName || otherName, [{ rel: entry.rel, with: root }]);
     }
   };
   if (!hasPersonBridge) {

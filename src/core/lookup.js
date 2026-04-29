@@ -19,7 +19,10 @@ export function splitCollab(name) {
   if (!s) return null;
   for (const sep of COLLAB_SEPARATORS) {
     if (!sep.test(s)) continue;
-    const parts = s.split(sep).map((p) => p.trim()).filter(Boolean);
+    const parts = s
+      .split(sep)
+      .map((p) => p.trim())
+      .filter(Boolean);
     if (parts.length >= 2) return parts;
   }
   return null;
@@ -58,9 +61,7 @@ export function lookupAll(names, providers, callbacks = {}) {
       const parts = splitCollab(name);
       if (parts) {
         const partResults = await Promise.all(
-          parts.map((p) =>
-            runOnePipeline(p, queued, callbacks, rootKeys, { reportName: null }),
-          ),
+          parts.map((p) => runOnePipeline(p, queued, callbacks, rootKeys, { reportName: null })),
         );
         for (const pr of partResults) {
           merged = mergeResults(merged, pr.merged);
@@ -69,9 +70,7 @@ export function lookupAll(names, providers, callbacks = {}) {
         onArtistDone?.(name, merged);
       }
 
-      const queried = Object.keys(combo.initialOutcomes).filter(
-        (k) => combo.initialOutcomes[k].ok,
-      );
+      const queried = Object.keys(combo.initialOutcomes).filter((k) => combo.initialOutcomes[k].ok);
       const errored = Object.keys(combo.initialOutcomes).filter(
         (k) => !combo.initialOutcomes[k].ok,
       );
@@ -104,9 +103,7 @@ async function runOnePipeline(name, queued, callbacks, rootKeys, { reportName })
 
   // Suppress onArtistDone routing for part runs — the part's display name
   // isn't a lineup row, so progress events for it have nowhere useful to land.
-  const expandCallbacks = reportName
-    ? callbacks
-    : { ...callbacks, onArtistDone: undefined };
+  const expandCallbacks = reportName ? callbacks : { ...callbacks, onArtistDone: undefined };
   const expanded = await expandIdentityGraph(name, merged0, queued, expandCallbacks, rootKeys);
   return { merged: expanded.merged, closure: expanded.closure, initialOutcomes };
 }
@@ -212,9 +209,7 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
   if (rejectedAliasKeys.size > 0) {
     accumulated = {
       ...accumulated,
-      aliases: accumulated.aliases.filter(
-        (a) => !rejectedAliasKeys.has(normaliseName(a?.name)),
-      ),
+      aliases: accumulated.aliases.filter((a) => !rejectedAliasKeys.has(normaliseName(a?.name))),
     };
   }
 
