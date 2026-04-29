@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lookupAll } from '../src/core/lookup.js';
+import { lookupAll, splitCollab } from '../src/core/lookup.js';
 
 function stubProvider(name, handlers) {
   return {
@@ -684,5 +684,67 @@ describe('lookupAll', () => {
 
     expect(outcomes.some((o) => o.ok === false)).toBe(true);
     expect(results[0].merged.aliases.map((a) => a.name)).toEqual(['X']);
+  });
+
+  it('splits "X vs Y" collab acts and merges constituents into the combo entry', async () => {
+    // Festival lineups list collab acts as combined names that providers don't
+    // know. Without splitting, the combo entry has empty data and never
+    // clusters with related lineup roots.
+    const p = stubProvider('p', {
+      'Skizologic vs Filteria': {
+        aliases: [],
+        groups: [],
+        members: [],
+        relatedProjects: [],
+      },
+      Filteria: {
+        aliases: [{ name: 'Jannis Tzikas' }],
+        groups: [],
+        members: [],
+        relatedProjects: [],
+      },
+      'Jannis Tzikas': {
+        aliases: [],
+        groups: [{ name: 'Ultravibe' }],
+        members: [],
+        relatedProjects: [],
+      },
+      Skizologic: { aliases: [], groups: [], members: [], relatedProjects: [] },
+      Ultravibe: { aliases: [], groups: [], members: [], relatedProjects: [] },
+    });
+
+    const results = await lookupAll(['Skizologic vs Filteria', 'Ultravibe'], [p]);
+    const combo = results.find((r) => r.name === 'Skizologic vs Filteria');
+    expect(combo.closure.has('ultravibe')).toBe(true);
+    expect(combo.closure.has('jannis tzikas')).toBe(true);
+  });
+});
+
+describe('splitCollab', () => {
+  it('splits on " vs " (case-insensitive, optional period)', () => {
+    expect(splitCollab('Skizologic vs Filteria')).toEqual(['Skizologic', 'Filteria']);
+    expect(splitCollab('The Infinity Project VS Excess Head')).toEqual([
+      'The Infinity Project',
+      'Excess Head',
+    ]);
+    expect(splitCollab('A vs. B')).toEqual(['A', 'B']);
+  });
+
+  it('splits on " b2b " and " & "', () => {
+    expect(splitCollab('Astrix b2b Vini Vici')).toEqual(['Astrix', 'Vini Vici']);
+    expect(splitCollab('Antidot & DICA')).toEqual(['Antidot', 'DICA']);
+  });
+
+  it('keeps "&" intact when "vs" also present (vs takes priority)', () => {
+    expect(splitCollab('Drop & Dash vs Germinator')).toEqual([
+      'Drop & Dash',
+      'Germinator',
+    ]);
+  });
+
+  it('returns null for non-collab names', () => {
+    expect(splitCollab('Infected Mushroom')).toBe(null);
+    expect(splitCollab('')).toBe(null);
+    expect(splitCollab(null)).toBe(null);
   });
 });

@@ -9,8 +9,24 @@ function shouldExpandAlias(alias) {
   return !alias?.type || !EXPAND_SKIP_TYPES.has(alias.type);
 }
 
+// Festival lineups commonly use "X vs Y", "X b2b Y", "X & Y" for collab acts.
+// Providers don't know these combined names, so we look up the constituents
+// individually and merge their data + closures into the combo's entry.
+const COLLAB_SEPARATORS = [/\s+vs\.?\s+/i, /\s+b2b\s+/i, /\s+&\s+/];
+
+export function splitCollab(name) {
+  const s = String(name ?? '').trim();
+  if (!s) return null;
+  for (const sep of COLLAB_SEPARATORS) {
+    if (!sep.test(s)) continue;
+    const parts = s.split(sep).map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2) return parts;
+  }
+  return null;
+}
+
 export function lookupAll(names, providers, callbacks = {}) {
-  const { onProviderResult, onArtistDone, onArtistComplete, signal } = callbacks;
+  const { onArtistDone, onArtistComplete, signal } = callbacks;
   const unique = dedupeNames(names);
   const rootKeys = new Set(unique.map(normaliseName).filter(Boolean));
 
@@ -32,34 +48,67 @@ export function lookupAll(names, providers, callbacks = {}) {
 
   return Promise.all(
     unique.map(async (name) => {
-      const initialOutcomes = {};
-      const perProvider = await Promise.all(
-        queued.map(async ({ provider, cachedLookup }) => {
-          const { promise, cached } = cachedLookup(name, { signal });
-          try {
-            const result = await promise;
-            initialOutcomes[provider.name] = { ok: true };
-            onProviderResult?.(name, provider.name, { ok: true, result, cached });
-            return result;
-          } catch (error) {
-            initialOutcomes[provider.name] = { ok: false };
-            onProviderResult?.(name, provider.name, { ok: false, error, cached });
-            return null;
-          }
-        }),
+      const combo = await runOnePipeline(name, queued, callbacks, rootKeys, {
+        reportName: name,
+      });
+
+      let merged = combo.merged;
+      const closure = new Set(combo.closure);
+
+      const parts = splitCollab(name);
+      if (parts) {
+        const partResults = await Promise.all(
+          parts.map((p) =>
+            runOnePipeline(p, queued, callbacks, rootKeys, { reportName: null }),
+          ),
+        );
+        for (const pr of partResults) {
+          merged = mergeResults(merged, pr.merged);
+          for (const k of pr.closure) closure.add(k);
+        }
+        onArtistDone?.(name, merged);
+      }
+
+      const queried = Object.keys(combo.initialOutcomes).filter(
+        (k) => combo.initialOutcomes[k].ok,
       );
-      let merged = mergeResults(...perProvider.filter(Boolean));
-      onArtistDone?.(name, merged);
-
-      const expanded = await expandIdentityGraph(name, merged, queued, callbacks, rootKeys);
-      merged = expanded.merged;
-
-      const queried = Object.keys(initialOutcomes).filter((k) => initialOutcomes[k].ok);
-      const errored = Object.keys(initialOutcomes).filter((k) => !initialOutcomes[k].ok);
-      onArtistComplete?.(name, merged, { queried, errored, closure: expanded.closure });
-      return { name, merged, closure: expanded.closure };
+      const errored = Object.keys(combo.initialOutcomes).filter(
+        (k) => !combo.initialOutcomes[k].ok,
+      );
+      onArtistComplete?.(name, merged, { queried, errored, closure });
+      return { name, merged, closure };
     }),
   );
+}
+
+async function runOnePipeline(name, queued, callbacks, rootKeys, { reportName }) {
+  const { onProviderResult, onArtistDone, signal } = callbacks;
+  const initialOutcomes = {};
+  const perProvider = await Promise.all(
+    queued.map(async ({ provider, cachedLookup }) => {
+      const { promise, cached } = cachedLookup(name, { signal });
+      try {
+        const result = await promise;
+        initialOutcomes[provider.name] = { ok: true };
+        onProviderResult?.(name, provider.name, { ok: true, result, cached });
+        return result;
+      } catch (error) {
+        initialOutcomes[provider.name] = { ok: false };
+        onProviderResult?.(name, provider.name, { ok: false, error, cached });
+        return null;
+      }
+    }),
+  );
+  const merged0 = mergeResults(...perProvider.filter(Boolean));
+  if (reportName) onArtistDone?.(reportName, merged0);
+
+  // Suppress onArtistDone routing for part runs — the part's display name
+  // isn't a lineup row, so progress events for it have nowhere useful to land.
+  const expandCallbacks = reportName
+    ? callbacks
+    : { ...callbacks, onArtistDone: undefined };
+  const expanded = await expandIdentityGraph(name, merged0, queued, expandCallbacks, rootKeys);
+  return { merged: expanded.merged, closure: expanded.closure, initialOutcomes };
 }
 
 async function expandIdentityGraph(artistName, initialMerged, queued, callbacks, rootKeys) {
