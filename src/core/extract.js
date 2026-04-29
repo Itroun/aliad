@@ -5,7 +5,6 @@ const SYSTEM_PROMPT_TEXT = `You extract artist and performer names from text rel
 
 Return a JSON object with:
 - "artists": array of artist/performer name strings
-- "discoveredAliases": array of { "artist": string, "aliases": string[] } for any alias, side-project, or group relationships mentioned
 
 Rules:
 - Include only artist/performer/DJ/band names — not venues, labels, cities, or event names
@@ -18,14 +17,12 @@ const SYSTEM_PROMPT_HTML = `You extract artist and performer names from text scr
 
 Return a JSON object with:
 - "artists": array of artist/performer name strings
-- "discoveredAliases": array of { "artist": string, "aliases": string[] } for any alias, side-project, or group relationships mentioned in descriptions
 
 Rules:
 - Include only artist/performer/DJ/band names — not venues, labels, cities, or event names
 - For collaborative acts like "X vs Y", "X & Y", "X b2b Y", return the combined name as-is
 - Strip set type annotations: "(DJ Set)", "(Live)", "(Producer Set)", etc.
 - If a name appears in different forms, pick the most complete version
-- Pay close attention to descriptions that mention aliases, real names, side projects, or group memberships
 - Return valid JSON only, no markdown fencing`;
 
 export function detectInputType(text) {
@@ -53,11 +50,11 @@ export function detectInputType(text) {
 
 export async function extractArtists(content, { type, signal, fetchFn = fetch, onCall } = {}) {
   if (type === 'clean-text') {
-    return { artists: parseLineup(content), discoveredAliases: [] };
+    return { artists: parseLineup(content) };
   }
 
   if (!content?.trim()) {
-    return { artists: [], discoveredAliases: [] };
+    return { artists: [] };
   }
 
   const systemPrompt = type === 'html' ? SYSTEM_PROMPT_HTML : SYSTEM_PROMPT_TEXT;
@@ -89,7 +86,6 @@ export async function extractArtists(content, { type, signal, fetchFn = fetch, o
 
   return {
     artists: Array.isArray(result.artists) ? result.artists : [],
-    discoveredAliases: Array.isArray(result.discoveredAliases) ? result.discoveredAliases : [],
   };
 }
 

@@ -5,7 +5,6 @@ import { createEmptyGraphScreen } from './ui/emptyGraphScreen.js';
 import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
 import { detectInputType, extractArtists } from './core/extract.js';
-import { createExtractionProvider } from './core/extractionProvider.js';
 import { cleanHTML } from './core/cleanHTML.js';
 import * as musicbrainz from './providers/musicbrainz.js';
 import * as discogs from './providers/discogs.js';
@@ -73,22 +72,18 @@ async function handleSubmit(input) {
   if (input.pasteFormat) devProbe.note(`paste format: ${input.pasteFormat}`);
 
   try {
-    const { artists, discoveredAliases } = await resolveInput(input, signal);
+    const { artists } = await resolveInput(input, signal);
     if (!artists.length) {
       setView('input');
       console.warn('No artist names found in input.');
       return;
     }
 
-    const activeProviders = discoveredAliases.length
-      ? [createExtractionProvider(discoveredAliases), ...providers]
-      : providers;
-
     const graph = createGraphScreen({ lineup: artists, onViewChange: setView });
     replaceGraphScreen(graph);
     setView('graph');
 
-    await lookupAll(artists, activeProviders, {
+    await lookupAll(artists, providers, {
       signal,
       onProviderResult: (artist, provider, outcome) => {
         if (signal.aborted) return;

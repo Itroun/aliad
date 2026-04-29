@@ -50,7 +50,6 @@ describe('callLLM', () => {
       { fetchFn },
     );
     expect(result.artists).toContain('Shpongle');
-    expect(result.discoveredAliases).toHaveLength(2);
   });
 
   it('handles markdown-fenced JSON in response', async () => {
@@ -111,7 +110,6 @@ describe('extractArtists', () => {
   it('uses parseLineup for clean text', async () => {
     const result = await extractArtists('Infected Mushroom\nShpongle', { type: 'clean-text' });
     expect(result.artists).toEqual(['Infected Mushroom', 'Shpongle']);
-    expect(result.discoveredAliases).toEqual([]);
   });
 
   it('calls LLM for messy text', async () => {
@@ -122,7 +120,6 @@ describe('extractArtists', () => {
     });
     expect(result.artists).toContain('Infected Mushroom');
     expect(result.artists).toContain('Shpongle');
-    expect(result.discoveredAliases.length).toBeGreaterThan(0);
   });
 
   it('calls LLM for html type', async () => {
@@ -132,7 +129,6 @@ describe('extractArtists', () => {
       fetchFn,
     });
     expect(result.artists).toContain('Dado vs Dino Psaras');
-    expect(result.discoveredAliases[0].aliases).toContain('Deedrah');
   });
 
   it('falls back to Sonnet when Haiku returns suspiciously few artists for a large input', async () => {
