@@ -1,9 +1,11 @@
-// Small home-grown force-directed layout.
-// Repulsion between every pair + edge springs + weak centering + velocity damping.
-// Positions persist across calls so the sim can be warm-started when nodes/edges
-// arrive incrementally — just call compute() again with the new names/edges.
+// Per-cluster force-directed layout with non-overlapping circle packing.
+// Each cluster runs its own sim in local space (no centering force) so the
+// internal shape is stable; the cluster's bounding circle is then packed into
+// the canvas alongside the others, guaranteeing no inter-cluster overlap.
+// Node positions persist across calls so warm starts keep the layout stable
+// as new artists arrive.
 
-function stepForces(nodes, edges, cfg) {
+function stepCluster(nodes, edges, cfg) {
   for (const n of nodes) {
     n.fx = 0;
     n.fy = 0;
@@ -39,63 +41,142 @@ function stepForces(nodes, edges, cfg) {
     b.fx -= ux * f;
     b.fy -= uy * f;
   }
+  // Weak pull toward local origin so the cluster stays compact around (0,0).
   for (const n of nodes) {
-    n.fx += (cfg.cx - n.x) * cfg.kCenter;
-    n.fy += (cfg.cy - n.y) * cfg.kCenter;
+    n.fx += -n.x * cfg.kCenter;
+    n.fy += -n.y * cfg.kCenter;
   }
   for (const n of nodes) {
     n.vx = (n.vx + n.fx) * cfg.damping;
     n.vy = (n.vy + n.fy) * cfg.damping;
     n.x += n.vx;
     n.y += n.vy;
-    if (n.x < cfg.padding) n.x = cfg.padding;
-    if (n.y < cfg.padding) n.y = cfg.padding;
-    if (n.x > cfg.width - cfg.padding) n.x = cfg.width - cfg.padding;
-    if (n.y > cfg.height - cfg.padding) n.y = cfg.height - cfg.padding;
   }
 }
 
-export function createLayout({ width, height, padding = 80 }) {
-  const positions = new Map();
+function boundingRadius(nodes, nodePadding) {
+  let max = 0;
+  for (const n of nodes) {
+    const r = Math.hypot(n.x, n.y);
+    if (r > max) max = r;
+  }
+  return max + nodePadding;
+}
 
-  function seed(name) {
-    // Place new nodes in a ring around the centre so they aren't stacked.
-    const i = positions.size;
-    const r = Math.min(width, height) * 0.28;
-    const a = (i * 2.399) % (Math.PI * 2); // golden-angle jitter
-    positions.set(name, {
-      x: width / 2 + Math.cos(a) * r,
-      y: height / 2 + Math.sin(a) * r,
+// Greedy circle packing: place the largest cluster at the canvas centre, then
+// place each subsequent cluster at the first candidate position that doesn't
+// overlap an already-placed circle. Candidates are sampled along rings of
+// increasing radius around the centre.
+function packClusters(circles, width, height, gap) {
+  const placed = [];
+  const cx = width / 2;
+  const cy = height / 2;
+  const sorted = [...circles].sort((a, b) => b.r - a.r);
+
+  for (const c of sorted) {
+    let best = null;
+    const maxR = Math.hypot(width, height);
+    const step = Math.max(20, c.r * 0.4);
+    outer: for (let ring = 0; ring <= maxR; ring += step) {
+      const samples = ring === 0 ? 1 : Math.max(8, Math.ceil((2 * Math.PI * ring) / step));
+      for (let s = 0; s < samples; s++) {
+        const a = (s / samples) * 2 * Math.PI;
+        const x = cx + Math.cos(a) * ring;
+        const y = cy + Math.sin(a) * ring;
+        let ok = true;
+        for (const p of placed) {
+          const d = Math.hypot(x - p.x, y - p.y);
+          if (d < c.r + p.r + gap) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) {
+          best = { x, y };
+          break outer;
+        }
+      }
+    }
+    if (!best) best = { x: cx, y: cy };
+    placed.push({ ...c, x: best.x, y: best.y });
+  }
+  const byId = new Map();
+  for (const p of placed) byId.set(p.id, p);
+  return byId;
+}
+
+export function createLayout({ width, height, padding = 80 }) {
+  // Local positions, stored in cluster-local coords (relative to cluster centre).
+  const localPositions = new Map(); // name → { x, y, vx, vy }
+
+  function seedLocal(name, indexInCluster) {
+    // Place new nodes on a small ring so they don't stack at the origin.
+    const r = 60;
+    const a = (indexInCluster * 2.399) % (Math.PI * 2);
+    localPositions.set(name, {
+      x: Math.cos(a) * r,
+      y: Math.sin(a) * r,
       vx: 0,
       vy: 0,
     });
   }
 
-  function compute({ names, edges = [] }, iterations = 200) {
-    for (const name of names) {
-      if (!positions.has(name)) seed(name);
-    }
-    const nodeList = names.map((n) => positions.get(n));
-    const edgeIdx = edges
-      .map(({ a, b }) => [names.indexOf(a), names.indexOf(b)])
-      .filter(([i, j]) => i >= 0 && j >= 0);
+  function compute({ clusters = [] }, iterations = 200) {
     const cfg = {
       kRep: 12000,
       kSpring: 0.04,
       restLen: 140,
-      kCenter: 0.012,
+      kCenter: 0.02,
       damping: 0.82,
-      cx: width / 2,
-      cy: height / 2,
-      width,
-      height,
-      padding,
     };
-    for (let it = 0; it < iterations; it++) stepForces(nodeList, edgeIdx, cfg);
+
+    const clusterInfos = [];
+    for (let ci = 0; ci < clusters.length; ci++) {
+      const { nodes: names, edges = [] } = clusters[ci];
+      names.forEach((name, i) => {
+        if (!localPositions.has(name)) seedLocal(name, i);
+      });
+      const nodeList = names.map((n) => localPositions.get(n));
+      const edgeIdx = edges
+        .map(({ a, b }) => [names.indexOf(a), names.indexOf(b)])
+        .filter(([i, j]) => i >= 0 && j >= 0);
+      for (let it = 0; it < iterations; it++) stepCluster(nodeList, edgeIdx, cfg);
+      // Re-centre cluster on its centroid so packing is symmetric.
+      let mx = 0;
+      let my = 0;
+      for (const n of nodeList) {
+        mx += n.x;
+        my += n.y;
+      }
+      mx /= nodeList.length || 1;
+      my /= nodeList.length || 1;
+      for (const n of nodeList) {
+        n.x -= mx;
+        n.y -= my;
+      }
+      clusterInfos.push({
+        id: `c${ci}`,
+        names,
+        r: boundingRadius(nodeList, 24),
+      });
+    }
+
+    const packed = packClusters(clusterInfos, width, height, 48);
+
+    // Convert to absolute positions and clamp inside canvas.
     const out = new Map();
-    for (const name of names) {
-      const p = positions.get(name);
-      out.set(name, { x: p.x, y: p.y });
+    for (const info of clusterInfos) {
+      const centre = packed.get(info.id);
+      for (const name of info.names) {
+        const p = localPositions.get(name);
+        let x = centre.x + p.x;
+        let y = centre.y + p.y;
+        if (x < padding) x = padding;
+        if (y < padding) y = padding;
+        if (x > width - padding) x = width - padding;
+        if (y > height - padding) y = height - padding;
+        out.set(name, { x, y });
+      }
     }
     return out;
   }
@@ -106,7 +187,7 @@ export function createLayout({ width, height, padding = 80 }) {
   }
 
   function drop(name) {
-    positions.delete(name);
+    localPositions.delete(name);
   }
 
   return { compute, resize, drop };
