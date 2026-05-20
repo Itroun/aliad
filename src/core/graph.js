@@ -30,22 +30,46 @@ function relForEntry(bucket, entry) {
   return BUCKET_TO_REL[bucket];
 }
 
-function collectRelations(merged) {
-  const rels = new Map();
-  for (const bucket of ['aliases', 'members', 'groups', 'relatedProjects']) {
+const REL_BUCKETS = ['aliases', 'members', 'groups', 'relatedProjects'];
+
+function sourceHasKey(merged, key) {
+  for (const bucket of REL_BUCKETS) {
     for (const entry of merged?.[bucket] ?? []) {
-      const key = normaliseName(entry?.name);
+      if (normaliseName(entry?.name) === key) return true;
+    }
+  }
+  return false;
+}
+
+// Build the relation map for a lineup entry. For collab combos ("X vs Y") the
+// merged data fuses both halves; `sources` lets us pin each relation to the
+// specific sub-name that actually hosts it. `subName` falls back to the combo
+// name when a relation is genuinely shared by more than one part.
+function collectRelations(entry) {
+  const merged = entry?.merged;
+  const sources =
+    entry?.sources?.length > 0 ? entry.sources : [{ name: entry?.name, merged }];
+
+  const rels = new Map();
+  for (const bucket of REL_BUCKETS) {
+    for (const e of merged?.[bucket] ?? []) {
+      const key = normaliseName(e?.name);
       if (!key) continue;
       if (!rels.has(key)) {
         rels.set(key, {
-          displayName: entry.name,
-          rel: relForEntry(bucket, entry),
+          displayName: e.name,
+          rel: relForEntry(bucket, e),
           bucket,
-          viaKey: normaliseName(entry?.via),
-          viaName: entry?.via,
+          viaKey: normaliseName(e?.via),
+          viaName: e?.via,
         });
       }
     }
+  }
+
+  for (const [key, rel] of rels) {
+    const owners = sources.filter((s) => sourceHasKey(s.merged, key));
+    rel.subName = owners.length === 1 ? owners[0].name : entry?.name;
   }
   return rels;
 }
@@ -72,10 +96,18 @@ function unionFind(n) {
 function buildEdge(A, B) {
   const aKey = normaliseName(A.name);
   const bKey = normaliseName(B.name);
-  const aRels = collectRelations(A.merged);
-  const bRels = collectRelations(B.merged);
+  const aRels = collectRelations(A);
+  const bRels = collectRelations(B);
+
+  // Combo parts ("X vs Y" → X, Y) are already represented by the combo node
+  // itself, so a bridge identity that *is* one of those parts is circular
+  // noise — the real connection sits on a direct/person-bridge row.
+  const aPartKeys = new Set((A.parts ?? []).map(normaliseName).filter(Boolean));
+  const bPartKeys = new Set((B.parts ?? []).map(normaliseName).filter(Boolean));
+  const isPartKey = (key) => aPartKeys.has(key) || bPartKeys.has(key);
 
   const evidence = [];
+  const suppressed = [];
   const seenPersons = new Set();
 
   const pushEvidence = (personKey, person, hops) => {
@@ -90,7 +122,7 @@ function buildEdge(A, B) {
   // already covered by the person-bridge row, just expressed honestly.
   let hasPersonBridge = false;
   for (const [key, aEntry] of aRels) {
-    if (key === aKey || key === bKey) continue;
+    if (key === aKey || key === bKey || isPartKey(key)) continue;
     const bEntry = bRels.get(key);
     if (!bEntry) continue;
     if (PERSON_BUCKETS.has(aEntry.bucket) && PERSON_BUCKETS.has(bEntry.bucket)) {
@@ -112,11 +144,13 @@ function buildEdge(A, B) {
     if (entry.viaKey && ownRels.has(entry.viaKey)) {
       const via = ownRels.get(entry.viaKey);
       pushEvidence(entry.viaKey, via.displayName || entry.viaName, [
-        { rel: via.rel, with: root },
+        { rel: via.rel, with: via.subName ?? root },
         { rel: groupBucketRel(entry), with: otherName },
       ]);
     } else {
-      pushEvidence(otherKey, entry.displayName || otherName, [{ rel: entry.rel, with: root }]);
+      pushEvidence(otherKey, entry.displayName || otherName, [
+        { rel: entry.rel, with: entry.subName ?? root },
+      ]);
     }
   };
   if (!hasPersonBridge) {
@@ -134,12 +168,23 @@ function buildEdge(A, B) {
     // through a different person — that's two acts both connected to a third
     // act, not actually connected to each other.
     if (aEntry.viaKey && bEntry.viaKey && aEntry.viaKey !== bEntry.viaKey) continue;
-    pushEvidence(key, aEntry.displayName || bEntry.displayName, [
-      { rel: aEntry.rel, with: A.name },
-      { rel: bEntry.rel, with: B.name },
-    ]);
+    const row = {
+      key,
+      person: aEntry.displayName || bEntry.displayName,
+      hops: [
+        { rel: aEntry.rel, with: aEntry.subName ?? A.name },
+        { rel: bEntry.rel, with: bEntry.subName ?? B.name },
+      ],
+    };
+    // A bridge that is itself a combo part is circular — hold it back as a
+    // fallback so the edge survives if it had no other evidence.
+    if (isPartKey(key)) suppressed.push(row);
+    else pushEvidence(key, row.person, row.hops);
   }
 
+  if (evidence.length === 0) {
+    for (const row of suppressed) pushEvidence(row.key, row.person, row.hops);
+  }
   if (evidence.length === 0) return null;
   return { a: A.name, b: B.name, evidence };
 }

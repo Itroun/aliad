@@ -10,7 +10,7 @@ export function createFocusPanel() {
   `;
 
   const body = root.querySelector('.panel-body');
-  let expanded = false;
+  let expanded = true;
   let currentEdgeKey = null;
 
   function edgeKey(edge) {
@@ -31,7 +31,7 @@ export function createFocusPanel() {
             (h, j) =>
               (j > 0 ? '<span class="sep">·</span>' : '') +
               `<span class="rel">${escape(h.rel)}</span>` +
-              '<span class="arrow">→</span>' +
+              ' ' +
               `<span class="with">${escape(h.with)}</span>`,
           )
           .join('');
@@ -72,7 +72,7 @@ export function createFocusPanel() {
   function update(edge) {
     const nextKey = edgeKey(edge);
     if (nextKey !== currentEdgeKey) {
-      expanded = false;
+      expanded = true;
       currentEdgeKey = nextKey;
     }
     if (!edge) renderPlaceholder();

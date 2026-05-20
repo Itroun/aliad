@@ -57,16 +57,20 @@ export function lookupAll(names, providers, callbacks = {}) {
 
       let merged = combo.merged;
       const closure = new Set(combo.closure);
+      // `sources` attributes each relation back to the sub-name that hosts it,
+      // so the graph can render "aka Filteria" rather than "aka X vs Filteria".
+      const sources = [{ name, merged: combo.merged }];
 
       const parts = splitCollab(name);
       if (parts) {
         const partResults = await Promise.all(
           parts.map((p) => runOnePipeline(p, queued, callbacks, rootKeys, { reportName: null })),
         );
-        for (const pr of partResults) {
+        partResults.forEach((pr, i) => {
           merged = mergeResults(merged, pr.merged);
           for (const k of pr.closure) closure.add(k);
-        }
+          sources.push({ name: parts[i], merged: pr.merged });
+        });
         onArtistDone?.(name, merged);
       }
 
@@ -75,7 +79,7 @@ export function lookupAll(names, providers, callbacks = {}) {
         (k) => !combo.initialOutcomes[k].ok,
       );
       onArtistComplete?.(name, merged, { queried, errored, closure });
-      return { name, merged, closure };
+      return { name, merged, closure, sources, parts: parts ?? [] };
     }),
   );
 }
