@@ -3,6 +3,7 @@ const NOOP_PROBE = {
   reset() {},
   onAttempt() {},
   note() {},
+  cache() {},
 };
 
 export function createDevProbe() {
@@ -20,9 +21,11 @@ export function createDevProbe() {
   el.append(heading, list);
 
   const rows = new Map();
+  let cacheRow = null;
 
   function reset() {
     rows.clear();
+    cacheRow = null;
     list.replaceChildren();
     el.hidden = true;
   }
@@ -60,5 +63,18 @@ export function createDevProbe() {
     list.append(li);
   }
 
-  return { el, reset, onAttempt, note };
+  function cache(stats) {
+    if (!stats) return;
+    el.hidden = false;
+    if (!cacheRow) {
+      cacheRow = document.createElement('li');
+      cacheRow.className = 'dev-probe-item state-info';
+      list.append(cacheRow);
+    }
+    cacheRow.textContent =
+      `cache · hits=${stats.hits} · misses=${stats.misses}` +
+      ` · stale=${stats.stale} · writes=${stats.writes}`;
+  }
+
+  return { el, reset, onAttempt, note, cache };
 }

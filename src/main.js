@@ -4,12 +4,14 @@ import { createGraphScreen } from './ui/graphScreen.js';
 import { createEmptyGraphScreen } from './ui/emptyGraphScreen.js';
 import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
+import { createCache } from './core/cache.js';
 import { detectInputType, extractArtists } from './core/extract.js';
 import { cleanHTML } from './core/cleanHTML.js';
 import * as musicbrainz from './providers/musicbrainz.js';
 import * as discogs from './providers/discogs.js';
 
 const providers = [musicbrainz, discogs];
+const cache = createCache();
 const app = document.querySelector('#app');
 const devProbe = createDevProbe();
 if (devProbe.el) document.body.append(devProbe.el);
@@ -85,9 +87,11 @@ async function handleSubmit(input) {
 
     await lookupAll(artists, providers, {
       signal,
+      cache,
       onProviderResult: (artist, provider, outcome) => {
         if (signal.aborted) return;
         devProbe.note(formatProviderNote(artist, provider, outcome));
+        devProbe.cache(cache.stats());
       },
       onArtistDone: (artist, merged) => {
         if (signal.aborted) return;

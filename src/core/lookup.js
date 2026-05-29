@@ -1,5 +1,12 @@
+import { createCache } from './cache.js';
 import { dedupeNames, mergeResults, normaliseName } from './merge.js';
 import { createQueue } from './rateLimit.js';
+
+let _defaultCache = null;
+function defaultCache() {
+  if (!_defaultCache) _defaultCache = createCache();
+  return _defaultCache;
+}
 
 const EXPAND_SKIP_TYPES = new Set(['Search hint', 'Legal name']);
 const MAX_EXPANSION_LOOKUPS = 25;
@@ -29,7 +36,8 @@ export function splitCollab(name) {
 }
 
 export function lookupAll(names, providers, callbacks = {}) {
-  const { onArtistDone, onArtistComplete, signal } = callbacks;
+  const { onArtistDone, onArtistComplete, signal, cache: injectedCache } = callbacks;
+  const persistent = injectedCache ?? defaultCache();
   const unique = dedupeNames(names);
   const rootKeys = new Set(unique.map(normaliseName).filter(Boolean));
 
@@ -37,14 +45,22 @@ export function lookupAll(names, providers, callbacks = {}) {
     const queue = provider.minIntervalMs
       ? createQueue({ minIntervalMs: provider.minIntervalMs })
       : { run: (fn) => fn() };
-    const cache = new Map();
-    const cachedLookup = (name, opts) => {
+    const inRun = new Map();
+    const cachedLookup = async (name, opts) => {
       const key = normaliseName(name);
-      if (!key) return { promise: queue.run(() => provider.lookup(name, opts)), cached: false };
-      if (cache.has(key)) return { promise: cache.get(key), cached: true };
-      const promise = queue.run(() => provider.lookup(name, opts));
-      cache.set(key, promise);
-      return { promise, cached: false };
+      if (!key) {
+        const result = await queue.run(() => provider.lookup(name, opts));
+        return { result, cached: false, fromPersistent: false, stale: false };
+      }
+      if (inRun.has(key)) {
+        const value = await inRun.get(key);
+        return { ...value, cached: true };
+      }
+      const promise = persistent.lookup(provider.name, key, {
+        fetch: () => queue.run(() => provider.lookup(name, opts)),
+      });
+      inRun.set(key, promise);
+      return promise;
     };
     return { provider, cachedLookup };
   });
@@ -89,15 +105,14 @@ async function runOnePipeline(name, queued, callbacks, rootKeys, { reportName })
   const initialOutcomes = {};
   const perProvider = await Promise.all(
     queued.map(async ({ provider, cachedLookup }) => {
-      const { promise, cached } = cachedLookup(name, { signal });
       try {
-        const result = await promise;
+        const { result, cached } = await cachedLookup(name, { signal });
         initialOutcomes[provider.name] = { ok: true };
         onProviderResult?.(name, provider.name, { ok: true, result, cached });
         return result;
       } catch (error) {
         initialOutcomes[provider.name] = { ok: false };
-        onProviderResult?.(name, provider.name, { ok: false, error, cached });
+        onProviderResult?.(name, provider.name, { ok: false, error, cached: false });
         return null;
       }
     }),
@@ -141,9 +156,8 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
 
     const perProvider = await Promise.all(
       queued.map(async ({ provider, cachedLookup }) => {
-        const { promise, cached } = cachedLookup(item.name, { signal });
         try {
-          const result = await promise;
+          const { result, cached } = await cachedLookup(item.name, { signal });
           onProviderResult?.(artistName, provider.name, {
             ok: true,
             result,
@@ -156,7 +170,7 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
             ok: false,
             error,
             via: item.name,
-            cached,
+            cached: false,
           });
           return null;
         }
