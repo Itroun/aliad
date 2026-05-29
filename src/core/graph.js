@@ -47,8 +47,7 @@ function sourceHasKey(merged, key) {
 // name when a relation is genuinely shared by more than one part.
 function collectRelations(entry) {
   const merged = entry?.merged;
-  const sources =
-    entry?.sources?.length > 0 ? entry.sources : [{ name: entry?.name, merged }];
+  const sources = entry?.sources?.length > 0 ? entry.sources : [{ name: entry?.name, merged }];
 
   const rels = new Map();
   for (const bucket of REL_BUCKETS) {

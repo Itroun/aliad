@@ -91,10 +91,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
     const edges = allEdges();
     const positions =
       clusterNames.length > 0
-        ? layout.compute(
-            { clusters: currentGraph.clusters },
-            firstLayoutRun ? 250 : 70,
-          )
+        ? layout.compute({ clusters: currentGraph.clusters }, firstLayoutRun ? 250 : 70)
         : new Map();
     firstLayoutRun = false;
 
