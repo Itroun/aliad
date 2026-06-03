@@ -125,6 +125,12 @@ Plain DOM, no framework, one `style.css`. `ui/graph/` is already separate from `
 
 ## Where caching should be added
 
+> **Note (post-phase-1).** The section below describes the *browser* cache (L1),
+> which Phase 1 shipped. It is per-browser and per-origin — it does **not** share
+> fetches between visitors. A shared server-side tier (L2) is added in Phase 1b
+> and consolidated in Phase 2b; see the Phasing list at the end of this doc and
+> the linked plan files. Read this section as "L1 design," not the whole story.
+
 **The problem.** The session-scoped `Map` in `lookup.js` is thrown away on reload. Every run re-fetches every artist, every alias, every member, even when the underlying data hasn't changed in months. MB and Discogs rate limits then dominate wall-clock time.
 
 **The principle.** Aliases, members, and group memberships are *high-stability* data. An artist's MusicBrainz aliases don't change between lunchtime and dinner. A 30-day TTL would capture almost all real updates while turning most lookups into local-storage reads.
@@ -217,13 +223,36 @@ Probably **not** a full SPARQL engine — the overhead and bundle size aren't ju
 
 ### Phasing
 
-The graph model is **strictly downstream** of the cache:
+The graph model is **strictly downstream** of the cache. Caching itself grew a
+second axis once we realised a *shared* cache was wanted (one visitor warming the
+cache for the next), which the original phase 1 — a per-browser IndexedDB cache —
+does not provide. So the cache track now has sub-phases before the graph work:
 
-1. **Phase 1 — cache.** Wrap `provider.lookup`, persist results, keep the current walker. Minimal disruption; immediate UX win. The whole codebase stays recognisable.
-2. **Phase 2 — graph substrate.** Replace the cache's value store with a quad store. Provider results decompose into quads on write. The walker still runs but reads from the graph instead of from blobs.
-3. **Phase 3 — query-shaped traversal.** Retire the BFS loop in favour of typed graph queries. `closure`, `via`, `viaChain` either disappear or become query metadata. The expansion *rules* survive — they just move from control flow to query constraints.
+1. **Phase 1 — browser cache (done).** Wrap `provider.lookup`, persist results in
+   per-browser IndexedDB (L1), keep the current walker. Minimal disruption;
+   immediate per-user UX win. See [PHASE1_CACHE_PLAN.md](./PHASE1_CACHE_PLAN.md).
+2. **Phase 1b — server-side shared cache (HTTP-level).** Add a shared L2 cache in
+   KV at the proxy boundary, keyed by upstream URL, so fetches are shared across
+   visitors. Requires proxying MusicBrainz (today it's called direct from the
+   browser). Browser mapping unchanged. See
+   [PHASE1B_SHARED_CACHE_PLAN.md](./PHASE1B_SHARED_CACHE_PLAN.md).
+3. **Phase 2b — mapped-result consolidation.** Move mapping server-side and cache
+   the mapped `(provider, normalisedName)` result, collapsing L1 and L2 into one
+   key space and one `SCHEMA_VERSION`. This is the server-side precondition for a
+   *shared* graph store. See
+   [PHASE2B_MAPPED_CACHE_PLAN.md](./PHASE2B_MAPPED_CACHE_PLAN.md).
+4. **Phase 2 — graph substrate.** Replace the cache's value store with a quad
+   store. Provider results decompose into quads on write. The walker still runs
+   but reads from the graph instead of from blobs. With 2b done, this happens
+   server-side and the graph is shared by construction; D1 (SQLite) becomes the
+   likely backing once indexed quad queries are needed.
+5. **Phase 3 — query-shaped traversal.** Retire the BFS loop in favour of typed
+   graph queries. `closure`, `via`, `viaChain` either disappear or become query
+   metadata. The expansion *rules* survive — they just move from control flow to
+   query constraints.
 
-Each phase is shippable on its own. Each preserves the provider contract, the UI shell, the rate-limit queues, and the merge primitives.
+Each phase is shippable on its own. Each preserves the provider contract, the UI
+shell, the rate-limit queues, and the merge primitives.
 
 ---
 
