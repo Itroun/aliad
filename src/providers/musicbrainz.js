@@ -6,10 +6,12 @@ export const name = 'musicbrainz';
 export const minIntervalMs = 1200;
 const MIN_SCORE = 90;
 
-const BASE = 'https://musicbrainz.org/ws/2';
+// Proxied through our Pages Function (functions/api/musicbrainz) so the call is
+// server-cached and can carry a proper User-Agent. See PHASE1B_SHARED_CACHE_PLAN.md.
+const BASE = '/api/musicbrainz/ws/2';
 
-export async function lookup(artistName, { signal, fetchFn = fetch, sleep } = {}) {
-  const ctx = { signal, fetchFn, sleep };
+export async function lookup(artistName, { signal, fetchFn = fetch, sleep, recordMeta } = {}) {
+  const ctx = { signal, fetchFn, sleep, recordMeta };
   const match = await search(artistName, ctx);
   if (!match) return emptyResult();
   const details = await fetchDetails(match.id, ctx);

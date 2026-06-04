@@ -7,8 +7,8 @@ export const minIntervalMs = 1500;
 
 const PROXY = '/api/discogs';
 
-export async function lookup(artistName, { signal, fetchFn = fetch, sleep } = {}) {
-  const ctx = { signal, fetchFn, sleep };
+export async function lookup(artistName, { signal, fetchFn = fetch, sleep, recordMeta } = {}) {
+  const ctx = { signal, fetchFn, sleep, recordMeta };
   const match = await search(artistName, ctx);
   if (!match) return emptyResult();
   const details = await fetchDetails(match.id, ctx);

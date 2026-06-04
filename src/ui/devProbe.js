@@ -4,6 +4,7 @@ const NOOP_PROBE = {
   onAttempt() {},
   note() {},
   cache() {},
+  serverCache() {},
 };
 
 export function createDevProbe() {
@@ -22,10 +23,16 @@ export function createDevProbe() {
 
   const rows = new Map();
   let cacheRow = null;
+  let serverCacheRow = null;
+  const serverTally = { HIT: 0, MISS: 0, STALE: 0 };
 
   function reset() {
     rows.clear();
     cacheRow = null;
+    serverCacheRow = null;
+    serverTally.HIT = 0;
+    serverTally.MISS = 0;
+    serverTally.STALE = 0;
     list.replaceChildren();
     el.hidden = true;
   }
@@ -76,5 +83,22 @@ export function createDevProbe() {
       ` · stale=${stats.stale} · writes=${stats.writes}`;
   }
 
-  return { el, reset, onAttempt, note, cache };
+  // Rolling tally of the shared L2 (proxy) cache outcomes, distinct from the
+  // per-browser L1 (IndexedDB) `cache` row above. Run a lineup in a second
+  // browser to see HITs climb — that proves the cross-visitor cache works.
+  function serverCache(outcome) {
+    if (!outcome || !(outcome in serverTally)) return;
+    serverTally[outcome]++;
+    el.hidden = false;
+    if (!serverCacheRow) {
+      serverCacheRow = document.createElement('li');
+      serverCacheRow.className = 'dev-probe-item state-info';
+      list.append(serverCacheRow);
+    }
+    serverCacheRow.textContent =
+      `server-cache · HIT=${serverTally.HIT}` +
+      ` · MISS=${serverTally.MISS} · STALE=${serverTally.STALE}`;
+  }
+
+  return { el, reset, onAttempt, note, cache, serverCache };
 }

@@ -107,7 +107,7 @@ BFS over the alias / member graph, with rules learned the hard way:
 
 ### 5. Collab splitting
 
-`splitCollab(name)` handles `X vs Y`, `X b2b Y`, `X & Y`. The orchestrator runs the full pipeline for the combo *and* each part, then merges them with attribution preserved in `sources`. Providers stay dumb about festival naming conventions.
+`splitCollab(name)` handles `X vs Y`, `X b2b Y`, `X & Y`. The orchestrator runs the full pipeline for the combo _and_ each part, then merges them with attribution preserved in `sources`. Providers stay dumb about festival naming conventions.
 
 ### 6. Progressive callbacks
 
@@ -125,7 +125,7 @@ Plain DOM, no framework, one `style.css`. `ui/graph/` is already separate from `
 
 ## Where caching should be added
 
-> **Note (post-phase-1).** The section below describes the *browser* cache (L1),
+> **Note (post-phase-1).** The section below describes the _browser_ cache (L1),
 > which Phase 1 shipped. It is per-browser and per-origin — it does **not** share
 > fetches between visitors. A shared server-side tier (L2) is added in Phase 1b
 > and consolidated in Phase 2b; see the Phasing list at the end of this doc and
@@ -133,7 +133,7 @@ Plain DOM, no framework, one `style.css`. `ui/graph/` is already separate from `
 
 **The problem.** The session-scoped `Map` in `lookup.js` is thrown away on reload. Every run re-fetches every artist, every alias, every member, even when the underlying data hasn't changed in months. MB and Discogs rate limits then dominate wall-clock time.
 
-**The principle.** Aliases, members, and group memberships are *high-stability* data. An artist's MusicBrainz aliases don't change between lunchtime and dinner. A 30-day TTL would capture almost all real updates while turning most lookups into local-storage reads.
+**The principle.** Aliases, members, and group memberships are _high-stability_ data. An artist's MusicBrainz aliases don't change between lunchtime and dinner. A 30-day TTL would capture almost all real updates while turning most lookups into local-storage reads.
 
 ### The cache seam: wrap `provider.lookup`
 
@@ -175,7 +175,7 @@ Not keyed by raw input casing — `normaliseName` is already the canonical key e
 
 `onProviderResult` already accepts `{ cached: boolean }`. The persistent cache should set this `true` for any hit not served from the in-run buffer. The UI can choose whether to surface this (subtle indicator, "fetched 12 days ago", etc.) — the data is already plumbed.
 
-### What does *not* change
+### What does _not_ change
 
 - Provider modules (they still just return `{ aliases, groups, members, relatedProjects }`).
 - `mergeResults` (cached + live results merge identically).
@@ -187,7 +187,7 @@ Not keyed by raw input casing — `normaliseName` is already the canonical key e
 
 ## Where the graph model should be added
 
-**The problem.** The current pipeline rebuilds the same graph from scratch every time. Even with a result cache, the *traversal* still runs as a recursive walk with a hop budget. The budget exists because each hop was a network round-trip; once hops are local, the budget concept is the wrong shape.
+**The problem.** The current pipeline rebuilds the same graph from scratch every time. Even with a result cache, the _traversal_ still runs as a recursive walk with a hop budget. The budget exists because each hop was a network round-trip; once hops are local, the budget concept is the wrong shape.
 
 **The deeper problem.** `closure: Set<normalisedName>` is an ad-hoc graph. `via` / `viaChain` / `viaHadMemberStep` is an ad-hoc edge-attribute system. The hard rules in `enqueueFromNode` (don't walk members of an alias-reached node, alias-with-members is a group, etc.) are graph-shape rules expressed as imperative control flow. The data model wants to be a graph; right now it's pretending to be a tree of merged result blobs.
 
@@ -210,7 +210,7 @@ Quads (with `provenance` carrying provider + sourceUrl + fetchedAt) preserve the
 - **Traversal becomes a query, not a recursion.** "What's the identity closure of X?" is a transitive query over `aka` edges. The fan-out cap and budget become rendering concerns, not fetching concerns.
 - **The hard-won rules become edge-typing rules.** "Don't walk members of an alias-reached node" is just "don't traverse `member_of` after traversing `aka` in this query." That's enforceable in one place instead of as scattered guards.
 - **Cluster union is free.** Two lineup rows that turn out to be the same identity share nodes by construction; no special closure-merging step.
-- **The cache and the graph become the same thing.** A cached MB lookup *is* a set of edges with a `fetchedAt` timestamp. The result-blob cache and the graph store collapse into one substrate.
+- **The cache and the graph become the same thing.** A cached MB lookup _is_ a set of edges with a `fetchedAt` timestamp. The result-blob cache and the graph store collapse into one substrate.
 - **New providers add edges, not blobs.** Wikidata's `same_as` becomes another `aka` edge with different provenance.
 
 ### What to use
@@ -224,22 +224,23 @@ Probably **not** a full SPARQL engine — the overhead and bundle size aren't ju
 ### Phasing
 
 The graph model is **strictly downstream** of the cache. Caching itself grew a
-second axis once we realised a *shared* cache was wanted (one visitor warming the
+second axis once we realised a _shared_ cache was wanted (one visitor warming the
 cache for the next), which the original phase 1 — a per-browser IndexedDB cache —
 does not provide. So the cache track now has sub-phases before the graph work:
 
 1. **Phase 1 — browser cache (done).** Wrap `provider.lookup`, persist results in
    per-browser IndexedDB (L1), keep the current walker. Minimal disruption;
    immediate per-user UX win. See [PHASE1_CACHE_PLAN.md](./PHASE1_CACHE_PLAN.md).
-2. **Phase 1b — server-side shared cache (HTTP-level).** Add a shared L2 cache in
-   KV at the proxy boundary, keyed by upstream URL, so fetches are shared across
-   visitors. Requires proxying MusicBrainz (today it's called direct from the
-   browser). Browser mapping unchanged. See
-   [PHASE1B_SHARED_CACHE_PLAN.md](./PHASE1B_SHARED_CACHE_PLAN.md).
+2. **Phase 1b — server-side shared cache (HTTP-level) (done).** A shared L2 cache
+   in KV at the proxy boundary (`functions/_lib/edgeCache.js`), keyed by upstream
+   URL, so fetches are shared across visitors. MusicBrainz is now proxied
+   (`functions/api/musicbrainz/[[path]].js`); Discogs's proxy wraps the same
+   helper. Browser mapping unchanged; the dev-probe shows a `server-cache` tally.
+   See [PHASE1B_SHARED_CACHE_PLAN.md](./PHASE1B_SHARED_CACHE_PLAN.md).
 3. **Phase 2b — mapped-result consolidation.** Move mapping server-side and cache
    the mapped `(provider, normalisedName)` result, collapsing L1 and L2 into one
    key space and one `SCHEMA_VERSION`. This is the server-side precondition for a
-   *shared* graph store. See
+   _shared_ graph store. See
    [PHASE2B_MAPPED_CACHE_PLAN.md](./PHASE2B_MAPPED_CACHE_PLAN.md).
 4. **Phase 2 — graph substrate.** Replace the cache's value store with a quad
    store. Provider results decompose into quads on write. The walker still runs
@@ -248,7 +249,7 @@ does not provide. So the cache track now has sub-phases before the graph work:
    likely backing once indexed quad queries are needed.
 5. **Phase 3 — query-shaped traversal.** Retire the BFS loop in favour of typed
    graph queries. `closure`, `via`, `viaChain` either disappear or become query
-   metadata. The expansion *rules* survive — they just move from control flow to
+   metadata. The expansion _rules_ survive — they just move from control flow to
    query constraints.
 
 Each phase is shippable on its own. Each preserves the provider contract, the UI

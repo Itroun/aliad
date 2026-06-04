@@ -92,6 +92,7 @@ async function handleSubmit(input) {
         if (signal.aborted) return;
         devProbe.note(formatProviderNote(artist, provider, outcome));
         devProbe.cache(cache.stats());
+        if (outcome.serverCache) devProbe.serverCache(outcome.serverCache);
       },
       onArtistDone: (artist, merged) => {
         if (signal.aborted) return;
@@ -220,7 +221,8 @@ async function callProxy(url, mode, signal) {
 
 function formatProviderNote(artist, provider, outcome) {
   const label = outcome.via ? `${artist} (via ${outcome.via})` : artist;
-  const suffix = outcome.cached ? ' · cached' : '';
+  const serverTag = outcome.serverCache ? ` · L2:${outcome.serverCache}` : '';
+  const suffix = (outcome.cached ? ' · cached' : '') + serverTag;
   if (!outcome.ok) {
     const reason = outcome.error?.message || 'failed';
     return `${label} · ${provider} · error: ${reason}${suffix}`;

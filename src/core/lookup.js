@@ -16,6 +16,17 @@ function shouldExpandAlias(alias) {
   return !alias?.type || !EXPAND_SKIP_TYPES.has(alias.type);
 }
 
+// A provider lookup may make several upstream calls (search + details), each
+// with its own X-Cache outcome. Collapse them to the least-cached one so the
+// dev-probe tally reflects whether the lookup actually touched the network.
+function aggregateServerCache(values) {
+  if (!values?.length) return undefined;
+  if (values.includes('MISS')) return 'MISS';
+  if (values.includes('STALE')) return 'STALE';
+  if (values.includes('HIT')) return 'HIT';
+  return values[0];
+}
+
 // Festival lineups commonly use "X vs Y", "X b2b Y", "X & Y" for collab acts.
 // Providers don't know these combined names, so we look up the constituents
 // individually and merge their data + closures into the combo's entry.
@@ -48,19 +59,35 @@ export function lookupAll(names, providers, callbacks = {}) {
     const inRun = new Map();
     const cachedLookup = async (name, opts) => {
       const key = normaliseName(name);
+      // Collect the proxy's X-Cache outcome(s) for this lookup's network calls.
+      // Stays empty on an L1 (IndexedDB) hit, since provider.lookup isn't run.
+      const seen = [];
+      const optsWithMeta = {
+        ...opts,
+        recordMeta: (m) => {
+          if (m?.serverCache) seen.push(m.serverCache);
+        },
+      };
       if (!key) {
-        const result = await queue.run(() => provider.lookup(name, opts));
-        return { result, cached: false, fromPersistent: false, stale: false };
+        const result = await queue.run(() => provider.lookup(name, optsWithMeta));
+        return {
+          result,
+          cached: false,
+          fromPersistent: false,
+          stale: false,
+          serverCache: aggregateServerCache(seen),
+        };
       }
       if (inRun.has(key)) {
         const value = await inRun.get(key);
         return { ...value, cached: true };
       }
       const promise = persistent.lookup(provider.name, key, {
-        fetch: () => queue.run(() => provider.lookup(name, opts)),
+        fetch: () => queue.run(() => provider.lookup(name, optsWithMeta)),
       });
       inRun.set(key, promise);
-      return promise;
+      const value = await promise;
+      return { ...value, serverCache: aggregateServerCache(seen) };
     };
     return { provider, cachedLookup };
   });
@@ -106,9 +133,9 @@ async function runOnePipeline(name, queued, callbacks, rootKeys, { reportName })
   const perProvider = await Promise.all(
     queued.map(async ({ provider, cachedLookup }) => {
       try {
-        const { result, cached } = await cachedLookup(name, { signal });
+        const { result, cached, serverCache } = await cachedLookup(name, { signal });
         initialOutcomes[provider.name] = { ok: true };
-        onProviderResult?.(name, provider.name, { ok: true, result, cached });
+        onProviderResult?.(name, provider.name, { ok: true, result, cached, serverCache });
         return result;
       } catch (error) {
         initialOutcomes[provider.name] = { ok: false };
@@ -157,12 +184,13 @@ async function expandIdentityGraph(artistName, initialMerged, queued, callbacks,
     const perProvider = await Promise.all(
       queued.map(async ({ provider, cachedLookup }) => {
         try {
-          const { result, cached } = await cachedLookup(item.name, { signal });
+          const { result, cached, serverCache } = await cachedLookup(item.name, { signal });
           onProviderResult?.(artistName, provider.name, {
             ok: true,
             result,
             via: item.name,
             cached,
+            serverCache,
           });
           return result;
         } catch (error) {
