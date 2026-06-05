@@ -1,5 +1,12 @@
 # Phase 2b: Mapped-result consolidation (server cache)
 
+> **Status: DONE.** Implemented in `functions/api/lookup.js` (shared mappers in
+> `src/providers/*.map.js`, shared `SCHEMA_VERSION` in `src/core/schemaVersion.js`),
+> with the browser providers now thin clients over `/api/lookup` and the Phase 1b
+> edge cache + per-provider proxies removed. Next up is **Phase 2 — graph
+> substrate** (see ARCHITECTURE.md phasing list). This doc is kept as the design
+> record.
+
 The goal: collapse the two independent cache tiers — L1 (browser IndexedDB, mapped
 results) and L2 (server KV, raw HTTP responses from Phase 1b) — into **one shared
 key space** keyed by `(provider, normalisedName)`, storing the _mapped_ result
