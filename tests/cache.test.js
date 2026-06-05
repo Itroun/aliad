@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, vi } from 'vitest';
-import { createCache, SCHEMA_VERSION } from '../src/core/cache.js';
+import { createCache } from '../src/core/cache.js';
+import { SCHEMA_VERSION } from '../src/core/schemaVersion.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 

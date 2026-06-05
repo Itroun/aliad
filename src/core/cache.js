@@ -1,6 +1,6 @@
-const DAY = 24 * 60 * 60 * 1000;
+import { SCHEMA_VERSION } from './schemaVersion.js';
 
-export const SCHEMA_VERSION = 1;
+const DAY = 24 * 60 * 60 * 1000;
 
 const TTL_NON_EMPTY = 30 * DAY;
 const TTL_EMPTY = 7 * DAY;
