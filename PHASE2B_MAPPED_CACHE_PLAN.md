@@ -2,8 +2,8 @@
 
 The goal: collapse the two independent cache tiers — L1 (browser IndexedDB, mapped
 results) and L2 (server KV, raw HTTP responses from Phase 1b) — into **one shared
-key space** keyed by `(provider, normalisedName)`, storing the *mapped* result
-shape. After this, L1 and L2 are two tiers of the *same* cache, and the server
+key space** keyed by `(provider, normalisedName)`, storing the _mapped_ result
+shape. After this, L1 and L2 are two tiers of the _same_ cache, and the server
 becomes the natural home for the Phase 2 graph substrate.
 
 This is the consolidation step that Phase 1b deliberately deferred. It is **not**
@@ -17,9 +17,9 @@ into the graph store (the canonical "Phase 2").
 
 ## Relationship to Phase 2 (graph substrate)
 
-`ARCHITECTURE.md` defines Phase 2 as replacing the cache's *value store* with a
+`ARCHITECTURE.md` defines Phase 2 as replacing the cache's _value store_ with a
 quad/graph store (still client-side in the original framing). Phase 2b is the
-**server-side precondition** for doing that *shared*:
+**server-side precondition** for doing that _shared_:
 
 - 2b moves result-mapping server-side and caches mapped results per
   `(provider, normalisedName)`. A mapped result is already "a set of edges with a
@@ -102,17 +102,19 @@ orchestrator, merge, and expansion walker are untouched.
 ## Trade-offs vs. staying on Phase 1b
 
 **For:**
+
 - One key space; L1 and L2 unify; one `SCHEMA_VERSION` governs both.
 - Fewer KV writes (per-artist, not per-HTTP-call).
 - Mapping lives in one place; the server owns rate-limit + map + cache.
 - Sets up the shared graph substrate cleanly.
 
 **Against / cost:**
+
 - Bigger refactor: mappers extracted, providers rewritten as thin clients, a new
   endpoint, more server logic to test.
 - Mapping now runs in the Workers runtime — keep mappers pure and dependency-free
   (they already are).
-- Plain `npm run dev` already can't do MB after 1b; 2b makes *all* lookups require
+- Plain `npm run dev` already can't do MB after 1b; 2b makes _all_ lookups require
   the Functions runtime locally. No additional DX regression beyond 1b's.
 
 ## Tests

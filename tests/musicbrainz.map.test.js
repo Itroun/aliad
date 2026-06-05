@@ -41,7 +41,12 @@ describe('musicbrainz.pickMatch', () => {
   it('returns null on a high-score name+alias mismatch', () => {
     const data = {
       artists: [
-        { id: 'abc', name: 'Totally Different Band', score: 100, aliases: [{ name: 'Another Name' }] },
+        {
+          id: 'abc',
+          name: 'Totally Different Band',
+          score: 100,
+          aliases: [{ name: 'Another Name' }],
+        },
       ],
     };
     expect(pickMatch(data, 'Infected Mushroom')).toBeNull();
@@ -49,7 +54,9 @@ describe('musicbrainz.pickMatch', () => {
 
   it('matches a candidate via one of its aliases', () => {
     const data = {
-      artists: [{ id: 'xyz', name: 'Canonical Name', score: 100, aliases: [{ name: 'Infected Mushroom' }] }],
+      artists: [
+        { id: 'xyz', name: 'Canonical Name', score: 100, aliases: [{ name: 'Infected Mushroom' }] },
+      ],
     };
     expect(pickMatch(data, 'Infected Mushroom').id).toBe('xyz');
   });

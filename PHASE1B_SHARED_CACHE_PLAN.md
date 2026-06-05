@@ -1,6 +1,6 @@
 # Phase 1b: Server-side shared cache (HTTP-level)
 
-The goal: stop every visitor from re-fetching artists that *another* visitor has
+The goal: stop every visitor from re-fetching artists that _another_ visitor has
 already fetched. Phase 1 gave each browser its own IndexedDB cache (L1, private,
 per-origin). Phase 1b adds a **shared L2 cache in front of the upstream APIs**, so
 the first person to look up an artist warms the cache for everyone.
@@ -23,8 +23,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the broader context;
   `{ aliases, groups, members, relatedProjects }`. The only browser change is
   pointing MusicBrainz at a proxy URL.
 - **Covers the expensive provider.** The dominant wall-clock cost is MusicBrainz
-  (1.2 s min interval, 1 req/sec). MB is currently called *direct from the
-  browser* (`src/providers/musicbrainz.js`), so it cannot be server-cached until
+  (1.2 s min interval, 1 req/sec). MB is currently called _direct from the
+  browser_ (`src/providers/musicbrainz.js`), so it cannot be server-cached until
   it is proxied. Proxying MB is the keystone of this phase — and it also lets us
   set a proper `User-Agent` server-side, which MB wants and which the browser
   forbids (see the rate-limits note in `CLAUDE.md`).
@@ -47,7 +47,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the broader context;
 ## What gets cached, and the key
 
 One KV entry per **upstream request URL** (not per artist — MB does a search call
-*and* a details call per artist; each is cached separately).
+_and_ a details call per artist; each is cached separately).
 
 ```
 key:   `httpcache:${version}:${provider}:${sha256(upstreamUrl)}`
@@ -63,7 +63,7 @@ value: {
   order) so different searches/details don't collide and keys stay under 512 B.
 - `version` is a constant in `edgeCache.js`. Bumping it orphans every old entry
   (they TTL out); no migration code, matching Phase 1's lazy invalidation.
-- We do **not** cache 5xx/network failures. We *do* cache successful empties (so a
+- We do **not** cache 5xx/network failures. We _do_ cache successful empties (so a
   not-found artist isn't re-fetched constantly) under a shorter TTL.
 
 ## TTL policy (mirrors Phase 1)
@@ -139,14 +139,14 @@ IndexedDB line:
   `fetchJson`/`callProxy` and into the `onProviderResult` callback as
   `serverCache: 'HIT'|...`.
 - Render a rolling tally, e.g. `server-cache · HIT=42 · MISS=7 · STALE=1`.
-- `build:dev` only; no production UI. This is how we'll *prove* the shared cache
+- `build:dev` only; no production UI. This is how we'll _prove_ the shared cache
   works (run in two different browsers; the second should see server HITs).
 
 ## Local dev impact (update CLAUDE.md)
 
 Moving MB behind the proxy means **MB no longer works under plain `npm run dev`**
 (Vite alone doesn't run Functions). `npm run build:dev && npx wrangler pages dev
-dist` becomes required for *all* lookups, not just Discogs. Update the Commands
+dist` becomes required for _all_ lookups, not just Discogs. Update the Commands
 section of `CLAUDE.md` accordingly.
 
 ## Tests
@@ -196,7 +196,7 @@ section of `CLAUDE.md` accordingly.
 6. Update `CLAUDE.md` (dev workflow) and this repo's docs.
 7. Manual verification: `build:dev && wrangler`, run a lineup in browser A, then
    the same lineup in a fresh browser/profile B — B should show `server-cache
-   HIT`s and finish fast despite an empty IndexedDB.
+HIT`s and finish fast despite an empty IndexedDB.
 
 Each step is a clean commit. Resist pulling Phase 2b (mapped-result unification,
 mapper-sharing, D1) into this phase — 1b wants to stay boring and reversible.

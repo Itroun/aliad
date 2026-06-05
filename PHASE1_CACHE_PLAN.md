@@ -64,7 +64,7 @@ value: {
 Today, in `lookup.js:36-50`:
 
 ```js
-const cache = new Map();                          // per-run dedupe
+const cache = new Map(); // per-run dedupe
 const cachedLookup = (name, opts) => {
   const key = normaliseName(name);
   if (cache.has(key)) return { promise: cache.get(key), cached: true };
@@ -77,10 +77,10 @@ const cachedLookup = (name, opts) => {
 After phase 1:
 
 ```js
-const inRun = new Map();                          // per-run dedupe (sync)
+const inRun = new Map(); // per-run dedupe (sync)
 const cachedLookup = (name, opts) => {
   const key = normaliseName(name);
-  if (inRun.has(key)) return inRun.get(key);      // {promise, cached, fromPersistent}
+  if (inRun.has(key)) return inRun.get(key); // {promise, cached, fromPersistent}
 
   const entry = persistentCache.lookup(provider.name, key, opts.signal);
   inRun.set(key, entry);
@@ -102,7 +102,7 @@ The current `cachedLookup` returns `{ promise, cached }` synchronously, and `run
 
 - `runOnePipeline` (`lookup.js:90-104`) — change `const { promise, cached } = cachedLookup(...)` plus `await promise` into one `await cachedLookup(...)`.
 - `expandIdentityGraph` (`lookup.js:142-164`) — same pattern.
-- Error-handling collapses too: the persistent layer never throws for a cache miss; it only throws if the underlying provider fetch fails *and* there's no stale fallback. The `try/catch` in the call-sites stays, just with a flatter shape.
+- Error-handling collapses too: the persistent layer never throws for a cache miss; it only throws if the underlying provider fetch fails _and_ there's no stale fallback. The `try/catch` in the call-sites stays, just with a flatter shape.
 
 ## Module layout
 
