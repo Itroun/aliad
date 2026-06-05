@@ -32,7 +32,7 @@ src/
 └── style.css
 
 functions/api/
-├── discogs/[[path]].js   Pages Function: injects token, restricts paths
+├── lookup.js             Pages Function: search+pick+details+map + shared KV cache (L2)
 └── extract/…             Anthropic proxy for lineup extraction
 ```
 
@@ -113,9 +113,9 @@ BFS over the alias / member graph, with rules learned the hard way:
 
 `onProviderResult` / `onArtistDone` / `onArtistComplete` / `onBudgetExhausted` — the UI updates as data arrives instead of waiting for the slowest provider. A cache layer must preserve this: cached hits fire the same callbacks with `cached: true`.
 
-### 7. Discogs proxy (`functions/api/discogs/[[path]].js`)
+### 7. Lookup endpoint (`functions/api/lookup.js`)
 
-Pages Function injects the token server-side and restricts paths to `database/` and `artists/`. Token never reaches the browser. Any future authenticated provider should follow this pattern.
+As of Phase 2b, both providers go through one Pages Function: `GET /api/lookup?provider=&name=`. It runs the full search + candidate-selection + details + map pipeline server-side (via the shared pure mappers in `src/providers/*.map.js`), injects the Discogs token and MusicBrainz `User-Agent`, enforces a per-IP rate limit, and caches one mapped result per `(provider, normalisedName)` in KV — the shared L2 tier. Tokens never reach the browser. Any future authenticated provider should follow this pattern.
 
 ### 8. UI shell
 
@@ -231,17 +231,18 @@ does not provide. So the cache track now has sub-phases before the graph work:
 1. **Phase 1 — browser cache (done).** Wrap `provider.lookup`, persist results in
    per-browser IndexedDB (L1), keep the current walker. Minimal disruption;
    immediate per-user UX win. See [PHASE1_CACHE_PLAN.md](./PHASE1_CACHE_PLAN.md).
-2. **Phase 1b — server-side shared cache (HTTP-level) (done).** A shared L2 cache
-   in KV at the proxy boundary (`functions/_lib/edgeCache.js`), keyed by upstream
-   URL, so fetches are shared across visitors. MusicBrainz is now proxied
-   (`functions/api/musicbrainz/[[path]].js`); Discogs's proxy wraps the same
-   helper. Browser mapping unchanged; the dev-probe shows a `server-cache` tally.
+2. **Phase 1b — server-side shared cache (HTTP-level) (done, since superseded).**
+   A shared L2 cache in KV at the proxy boundary, keyed by upstream URL, so
+   fetches are shared across visitors. Replaced by Phase 2b — the raw-HTTP edge
+   cache and the per-provider proxies it wrapped have been removed.
    See [PHASE1B_SHARED_CACHE_PLAN.md](./PHASE1B_SHARED_CACHE_PLAN.md).
-3. **Phase 2b — mapped-result consolidation.** Move mapping server-side and cache
-   the mapped `(provider, normalisedName)` result, collapsing L1 and L2 into one
-   key space and one `SCHEMA_VERSION`. This is the server-side precondition for a
-   _shared_ graph store. See
-   [PHASE2B_MAPPED_CACHE_PLAN.md](./PHASE2B_MAPPED_CACHE_PLAN.md).
+3. **Phase 2b — mapped-result consolidation (done).** Mapping moved server-side
+   into `functions/api/lookup.js`, which caches the mapped
+   `(provider, normalisedName)` result in KV. L1 (IndexedDB) and L2 (KV) now share
+   the same key shape and one `SCHEMA_VERSION` (`src/core/schemaVersion.js`),
+   collapsing them into two tiers of one cache. Browser providers are thin clients
+   over `/api/lookup`. This is the server-side precondition for a _shared_ graph
+   store. See [PHASE2B_MAPPED_CACHE_PLAN.md](./PHASE2B_MAPPED_CACHE_PLAN.md).
 4. **Phase 2 — graph substrate.** Replace the cache's value store with a quad
    store. Provider results decompose into quads on write. The walker still runs
    but reads from the graph instead of from blobs. With 2b done, this happens
