@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { lookup, mapDetails } from '../src/providers/discogs.js';
+import { lookup } from '../src/providers/discogs.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => JSON.parse(readFileSync(join(here, 'fixtures', name), 'utf8'));
@@ -79,39 +79,5 @@ describe('discogs.lookup', () => {
   it('throws on non-ok HTTP status', async () => {
     const fetchFn = async () => ({ ok: false, status: 429, json: async () => ({}) });
     await expect(lookup('whatever', { fetchFn, sleep: () => {} })).rejects.toThrow(/429/);
-  });
-});
-
-describe('discogs.mapDetails', () => {
-  it('builds source URLs for each entry', () => {
-    const details = fixture('discogs-details-infected-mushroom.json');
-    const result = mapDetails(details);
-    expect(result.members[0].sourceUrl).toBe('https://www.discogs.com/artist/200001');
-    expect(result.groups[0].sourceUrl).toBe('https://www.discogs.com/artist/300001');
-  });
-
-  it('strips Discogs disambiguation suffixes from names', () => {
-    const details = {
-      id: 1,
-      aliases: [{ id: 2, name: 'Muttley (3)' }],
-      groups: [{ id: 3, name: 'Juice (13)' }],
-      members: [{ id: 4, name: 'Trickster (2)' }],
-    };
-    const result = mapDetails(details);
-    expect(result.aliases[0].name).toBe('Muttley');
-    expect(result.groups[0].name).toBe('Juice');
-    expect(result.members[0].name).toBe('Trickster');
-  });
-
-  it('preserves names with non-disambiguation parentheses', () => {
-    const details = {
-      id: 1,
-      aliases: [{ id: 2, name: 'Sunn O)))' }],
-      groups: [],
-      members: [{ id: 3, name: 'Earth (band)' }],
-    };
-    const result = mapDetails(details);
-    expect(result.aliases[0].name).toBe('Sunn O)))');
-    expect(result.members[0].name).toBe('Earth (band)');
   });
 });

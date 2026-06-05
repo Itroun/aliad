@@ -1,10 +1,9 @@
 import { emptyResult } from './provider.js';
 import { fetchJson } from '../core/fetchJson.js';
-import { normaliseName } from '../core/merge.js';
+import { mapDetails, pickMatch } from './musicbrainz.map.js';
 
 export const name = 'musicbrainz';
 export const minIntervalMs = 1200;
-const MIN_SCORE = 90;
 
 // Proxied through our Pages Function (functions/api/musicbrainz) so the call is
 // server-cached and can carry a proper User-Agent. See PHASE1B_SHARED_CACHE_PLAN.md.
@@ -22,21 +21,7 @@ async function search(artistName, ctx) {
   const query = encodeURIComponent(`artist:"${artistName}"`);
   const url = `${BASE}/artist?query=${query}&fmt=json&limit=5`;
   const data = await getJson(url, ctx);
-  const q = normaliseName(artistName);
-  for (const candidate of data?.artists ?? []) {
-    if (!candidate?.id) continue;
-    if ((candidate.score ?? 0) < MIN_SCORE) break;
-    if (nameMatches(q, candidate)) return candidate;
-  }
-  return null;
-}
-
-function nameMatches(normalisedQuery, candidate) {
-  if (normaliseName(candidate.name) === normalisedQuery) return true;
-  for (const alias of candidate.aliases ?? []) {
-    if (normaliseName(alias?.name) === normalisedQuery) return true;
-  }
-  return false;
+  return pickMatch(data, artistName);
 }
 
 async function fetchDetails(mbid, ctx) {

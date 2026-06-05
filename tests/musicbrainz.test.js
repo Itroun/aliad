@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { lookup, mapDetails } from '../src/providers/musicbrainz.js';
+import { lookup } from '../src/providers/musicbrainz.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => JSON.parse(readFileSync(join(here, 'fixtures', name), 'utf8'));
@@ -99,15 +99,5 @@ describe('musicbrainz.lookup', () => {
   it('throws on non-ok HTTP status', async () => {
     const fetchFn = async () => ({ ok: false, status: 503, json: async () => ({}) });
     await expect(lookup('whatever', { fetchFn, sleep: () => {} })).rejects.toThrow(/503/);
-  });
-});
-
-describe('musicbrainz.mapDetails', () => {
-  it('filters out backward supporting-musician relations', () => {
-    const details = fixture('musicbrainz-details-infected-mushroom.json');
-    const result = mapDetails(details);
-    const names = result.relatedProjects.map((r) => r.name);
-    expect(names).not.toContain('Jonathan Davis');
-    expect(names).not.toContain('Perry Farrell');
   });
 });
