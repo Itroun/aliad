@@ -1,83 +1,42 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
 import { lookup } from '../src/providers/discogs.js';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const fixture = (name) => JSON.parse(readFileSync(join(here, 'fixtures', name), 'utf8'));
+// Phase 2b: the provider is a thin client over /api/lookup. Mapping logic is
+// tested in discogs.map.test.js and lookupEndpoint.test.js.
 
-function fakeFetch(routes) {
-  return async (url) => {
-    for (const [match, payload] of routes) {
-      if (url.includes(match)) {
-        return { ok: true, status: 200, json: async () => payload };
-      }
-    }
-    throw new Error(`unexpected fetch: ${url}`);
+function fakeFetch(payload, { status = 200, ok = true, cache } = {}) {
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url);
+    return {
+      ok,
+      status,
+      headers: { get: (h) => (h === 'X-Cache' ? (cache ?? null) : null) },
+      json: async () => payload,
+    };
   };
+  return { fetchFn, calls };
 }
 
-describe('discogs.lookup', () => {
-  it('maps a search + details response', async () => {
-    const search = fixture('discogs-search-infected-mushroom.json');
-    const details = fixture('discogs-details-infected-mushroom.json');
-    const fetchFn = fakeFetch([
-      ['/database/search', search],
-      [`/artists/${search.results[0].id}`, details],
-    ]);
+const MAPPED = { aliases: [{ name: 'I.M.' }], groups: [], members: [], relatedProjects: [] };
 
+describe('discogs.lookup (thin client)', () => {
+  it('requests /api/lookup with provider and url-encoded name', async () => {
+    const { fetchFn, calls } = fakeFetch(MAPPED);
     const result = await lookup('Infected Mushroom', { fetchFn });
-
-    expect(result.aliases.map((a) => a.name)).toEqual(['I.M.']);
-    expect(result.members.map((m) => m.name)).toEqual(['Erez Eisen', 'Amit Duvdevani']);
-    expect(result.groups.map((g) => g.name)).toEqual(['Fly Agaric']);
-    expect(result.relatedProjects).toEqual([]);
+    expect(calls[0]).toBe('/api/lookup?provider=discogs&name=Infected%20Mushroom');
+    expect(result).toEqual(MAPPED);
   });
 
-  it('returns the empty shape when search finds no artist', async () => {
-    const fetchFn = fakeFetch([['/database/search', { results: [] }]]);
-    const result = await lookup('Nonexistent 12345', { fetchFn });
-    expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
+  it('surfaces the server X-Cache header via recordMeta', async () => {
+    const { fetchFn } = fakeFetch(MAPPED, { cache: 'MISS' });
+    const seen = [];
+    await lookup('x', { fetchFn, recordMeta: (m) => seen.push(m) });
+    expect(seen).toContainEqual({ serverCache: 'MISS' });
   });
 
-  it('rejects search results whose title does not match the query', async () => {
-    const fetchFn = fakeFetch([
-      ['/database/search', { results: [{ id: 99, title: 'Completely Different Artist' }] }],
-    ]);
-    const result = await lookup('Infected Mushroom', { fetchFn });
-    expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
-  });
-
-  it('skips non-matching results and takes the first title match', async () => {
-    const search = {
-      results: [
-        { id: 1, title: 'Not Right' },
-        { id: 2, title: 'Infected Mushroom' },
-      ],
-    };
-    const details = { id: 2, aliases: [], groups: [], members: [] };
-    const fetchFn = fakeFetch([
-      ['/database/search', search],
-      ['/artists/2', details],
-    ]);
-    const result = await lookup('Infected Mushroom', { fetchFn });
-    expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
-  });
-
-  it('matches titles that only differ by a Discogs disambiguation suffix', async () => {
-    const search = { results: [{ id: 7, title: 'Muttley (3)' }] };
-    const details = { id: 7, aliases: [], groups: [], members: [] };
-    const fetchFn = fakeFetch([
-      ['/database/search', search],
-      ['/artists/7', details],
-    ]);
-    const result = await lookup('Muttley', { fetchFn });
-    expect(result).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
-  });
-
-  it('throws on non-ok HTTP status', async () => {
-    const fetchFn = async () => ({ ok: false, status: 429, json: async () => ({}) });
-    await expect(lookup('whatever', { fetchFn, sleep: () => {} })).rejects.toThrow(/429/);
+  it('throws on a non-ok response', async () => {
+    const { fetchFn } = fakeFetch({}, { ok: false, status: 429 });
+    await expect(lookup('x', { fetchFn, sleep: () => {} })).rejects.toThrow(/429/);
   });
 });
