@@ -1,20 +1,26 @@
-// Unified server lookup endpoint (Phase 2b). GET /api/lookup?provider=&name=
+// Unified server lookup endpoint. GET /api/lookup?provider=&name=
 //
-// Supersedes the per-HTTP-call edge cache (Phase 1b): instead of caching raw
-// upstream JSON keyed by URL, this does the full search + details + map
-// server-side and caches ONE mapped result per (provider, normalisedName) — the
-// same key shape and value shape as the L1 browser cache (src/core/cache.js).
-// L1 and L2 are now two tiers of the same cache, governed by one SCHEMA_VERSION.
+// Does the full search + details + map server-side and caches ONE mapped result
+// per (provider, normalisedName) — the same key shape and value shape as the L1
+// browser cache (src/core/cache.js). L1 and L2 are two tiers of the same cache,
+// governed by one SCHEMA_VERSION.
 //
-// Far fewer KV writes than 1b (one per artist, not one per upstream HTTP call),
-// which directly eases the write-budget pressure flagged in PHASE1B.
-// See PHASE2B_MAPPED_CACHE_PLAN.md.
+// Phase 2: the L2 value store is now a D1 quad graph rather than a single KV
+// blob. On write the mapped result is decomposed into typed quads (src/core/
+// quads.js) and stored via the D1 adapter (functions/_lib/quadStore.js); on read
+// the blob is reconstituted from that lookup's quads. The returned JSON is
+// byte-identical to before — only the backing store changed — so the browser
+// walker and provider contract are untouched. This lays the shared, queryable
+// substrate for Phase 3 (server-side closure queries). KV stays, but now only
+// for rate limiting + the Anthropic ceiling. See PHASE2_GRAPH_PLAN.md.
 
 import { checkRateLimit } from '../_lib/kvLimit.js';
+import { makeD1Store } from '../_lib/quadStore.js';
 import { SCHEMA_VERSION } from '../../src/core/schemaVersion.js';
 import { normaliseName } from '../../src/core/merge.js';
 import { fetchWithRetry } from '../../src/core/fetchWithRetry.js';
 import { emptyResult } from '../../src/providers/provider.js';
+import { resultToQuads, quadsToResult, sourceKeyFor } from '../../src/core/quads.js';
 import * as mb from '../../src/providers/musicbrainz.map.js';
 import * as discogs from '../../src/providers/discogs.map.js';
 
@@ -28,9 +34,8 @@ const DAY = 24 * 3600;
 // case the artist gets added upstream.
 const TTL_NONEMPTY_SEC = 30 * DAY;
 const TTL_EMPTY_SEC = 7 * DAY;
-// Extra lifetime past freshness so an expired entry can still be served STALE
-// when the upstream is unreachable. KV record lives for ttl + this.
-const STALE_GRACE_SEC = 7 * DAY;
+// D1 has no TTL, so an expired entry's quads simply remain until rewritten —
+// which is exactly what lets us serve them STALE when the upstream is down.
 
 const PROVIDERS = {
   musicbrainz: {
@@ -65,14 +70,6 @@ const PROVIDERS = {
   },
 };
 
-function safeParse(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
 function isResultEmpty(result) {
   return (
     (result?.aliases?.length ?? 0) === 0 &&
@@ -105,7 +102,7 @@ async function lookupUpstream(cfg, env, name, fetchFn, sleep) {
  */
 export async function handleLookup(
   env,
-  { provider, name, fetchFn = fetch, sleep, now = Date.now },
+  { provider, name, fetchFn = fetch, sleep, now = Date.now, store },
 ) {
   const cfg = PROVIDERS[provider];
   if (!cfg) return { status: 400, body: 'Unknown provider', cache: null };
@@ -117,50 +114,64 @@ export async function handleLookup(
   const nameKey = normaliseName(name);
   if (!nameKey) return ok(emptyResult(), 'BYPASS');
 
-  // Degraded: no KV bound → straight upstream, no caching (same posture as kvLimit).
-  if (!env?.KV) {
+  // store is injectable for tests; default to the D1-backed adapter when bound.
+  const graph = store ?? (env?.DB ? makeD1Store(env.DB) : null);
+
+  // Degraded: no D1 bound → straight upstream, no caching (same posture as kvLimit).
+  if (!graph) {
     return ok(await lookupUpstream(cfg, env, name, fetchFn, sleep), 'BYPASS');
   }
 
-  const key = `lookup:${SCHEMA_VERSION}:${provider}:${nameKey}`;
-  let stored = null;
+  const sourceKey = sourceKeyFor(provider, nameKey);
+  let lookupRow = null;
   try {
-    const raw = await env.KV.get(key);
-    if (raw) {
-      const parsed = safeParse(raw);
-      if (parsed && parsed.v === SCHEMA_VERSION) stored = parsed;
-    }
+    const row = await graph.getLookup(sourceKey);
+    if (row && row.schema_version === SCHEMA_VERSION) lookupRow = row;
   } catch {
-    // KV read failed — treat as a miss.
+    // D1 read failed — treat as a miss.
   }
 
-  if (stored && now() < stored.expiresAt) {
-    return ok(stored.result, 'HIT');
+  const reconstitute = async () => quadsToResult(nameKey, await graph.getQuads(sourceKey));
+
+  if (lookupRow && now() < lookupRow.expires_at) {
+    try {
+      return ok(await reconstitute(), 'HIT');
+    } catch {
+      // Reconstitution failed (e.g. D1 hiccup) — fall through to a fresh fetch.
+    }
   }
 
   let result;
   try {
     result = await lookupUpstream(cfg, env, name, fetchFn, sleep);
   } catch (err) {
-    // Stale-on-error: serve a prior (expired) entry rather than failing.
-    if (stored) return ok(stored.result, 'STALE');
+    // Stale-on-error: serve a prior (expired) entry's quads rather than failing.
+    if (lookupRow) {
+      try {
+        return ok(await reconstitute(), 'STALE');
+      } catch {
+        // fall through to the 502 below
+      }
+    }
     return { status: 502, body: 'Upstream lookup failed', cache: null };
   }
 
   const isEmpty = isResultEmpty(result);
   const ttl = isEmpty ? TTL_EMPTY_SEC : TTL_NONEMPTY_SEC;
   const fetchedAt = now();
-  const entry = {
-    v: SCHEMA_VERSION,
-    result,
-    isEmpty,
+  const row = {
+    sourceKey,
+    provider,
+    nameKey,
+    schemaVersion: SCHEMA_VERSION,
     fetchedAt,
+    isEmpty,
     expiresAt: fetchedAt + ttl * 1000,
   };
   try {
-    await env.KV.put(key, JSON.stringify(entry), { expirationTtl: ttl + STALE_GRACE_SEC });
+    await graph.putLookupWithQuads(row, resultToQuads(provider, nameKey, name, result));
   } catch {
-    // Write failed (e.g. budget) — still serve the fresh result this request.
+    // Write failed — still serve the fresh result this request.
   }
   return ok(result, 'MISS');
 }

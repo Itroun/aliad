@@ -32,8 +32,15 @@ src/
 └── style.css
 
 functions/api/
-├── lookup.js             Pages Function: search+pick+details+map + shared KV cache (L2)
+├── lookup.js             Pages Function: search+pick+details+map + shared D1 quad cache (L2)
 └── extract/…             Anthropic proxy for lineup extraction
+
+functions/_lib/
+├── kvLimit.js            per-IP rate limit + Anthropic daily ceiling (KV)
+└── quadStore.js          D1 adapter: lookups + quads tables (the only raw SQL)
+
+src/core/quads.js         pure: mapped result ⇄ typed quads (decompose / reconstitute)
+migrations/0001_create_graph.sql   D1 schema
 ```
 
 ## What works well together
@@ -243,11 +250,15 @@ does not provide. So the cache track now has sub-phases before the graph work:
    collapsing them into two tiers of one cache. Browser providers are thin clients
    over `/api/lookup`. This is the server-side precondition for a _shared_ graph
    store. See [PHASE2B_MAPPED_CACHE_PLAN.md](./PHASE2B_MAPPED_CACHE_PLAN.md).
-4. **Phase 2 — graph substrate.** Replace the cache's value store with a quad
-   store. Provider results decompose into quads on write. The walker still runs
-   but reads from the graph instead of from blobs. With 2b done, this happens
-   server-side and the graph is shared by construction; D1 (SQLite) becomes the
-   likely backing once indexed quad queries are needed.
+4. **Phase 2 — graph substrate (done).** The L2 value store is now a D1 quad
+   graph. On write, the mapped result decomposes into typed quads
+   (`aka` / `member_of` / `related_project`) via `src/core/quads.js` and is stored
+   through `functions/_lib/quadStore.js`, keyed by `source_key`. On read the blob
+   is reconstituted from that lookup's quads — substrate-only, so the returned
+   JSON, the `/api/lookup` contract, and the browser walker are unchanged. The
+   `by-subject` / `by-predicate-object` indexes are created now so Phase 3 needs
+   no migration. KV stays for rate limiting + the Anthropic ceiling. See
+   [PHASE2_GRAPH_PLAN.md](./PHASE2_GRAPH_PLAN.md).
 5. **Phase 3 — query-shaped traversal.** Retire the BFS loop in favour of typed
    graph queries. `closure`, `via`, `viaChain` either disappear or become query
    metadata. The expansion _rules_ survive — they just move from control flow to

@@ -1,0 +1,98 @@
+// D1 adapter for the Phase 2 graph substrate. The ONLY place raw D1 SQL lives —
+// handleLookup talks to the small interface returned by makeD1Store, and tests
+// inject an in-memory fake implementing the same three methods (mirroring how
+// fakeKV stands in for the KV binding). Schema in migrations/0001_create_graph.sql.
+//
+// Two tables:
+//   lookups — one row per (provider, normalisedName) lookup: freshness + is_empty.
+//   quads   — the decomposed edges, attributed to the producing lookup via
+//             source_key. Reconstitution selects a single source_key's quads.
+
+export function makeD1Store(db) {
+  return {
+    // Returns the lookups row for a source_key, or null.
+    async getLookup(sourceKey) {
+      return db
+        .prepare(
+          `SELECT source_key, provider, name_key, schema_version, fetched_at, is_empty, expires_at
+             FROM lookups WHERE source_key = ?`,
+        )
+        .bind(sourceKey)
+        .first();
+    },
+
+    // Returns the quads produced by a source_key, in insertion (rowid) order so
+    // the reconstituted result preserves per-bucket ordering.
+    async getQuads(sourceKey) {
+      const { results } = await db
+        .prepare(
+          `SELECT source_key, subject, predicate, object, subject_label, object_label,
+                  entry_type, source_url
+             FROM quads WHERE source_key = ? ORDER BY rowid`,
+        )
+        .bind(sourceKey)
+        .all();
+      // Map snake_case columns back to the camelCase quad shape quads.js expects.
+      return (results ?? []).map((r) => ({
+        sourceKey: r.source_key,
+        subject: r.subject,
+        predicate: r.predicate,
+        object: r.object,
+        subjectLabel: r.subject_label,
+        objectLabel: r.object_label,
+        entryType: r.entry_type,
+        sourceUrl: r.source_url,
+      }));
+    },
+
+    // Atomically replace a lookup and its quads. delete-then-insert keeps a
+    // rewrite from accumulating stale edges; the upsert refreshes freshness.
+    async putLookupWithQuads(row, quads) {
+      const statements = [
+        db
+          .prepare(
+            `INSERT INTO lookups
+               (source_key, provider, name_key, schema_version, fetched_at, is_empty, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(source_key) DO UPDATE SET
+               provider = excluded.provider,
+               name_key = excluded.name_key,
+               schema_version = excluded.schema_version,
+               fetched_at = excluded.fetched_at,
+               is_empty = excluded.is_empty,
+               expires_at = excluded.expires_at`,
+          )
+          .bind(
+            row.sourceKey,
+            row.provider,
+            row.nameKey,
+            row.schemaVersion,
+            row.fetchedAt,
+            row.isEmpty ? 1 : 0,
+            row.expiresAt,
+          ),
+        db.prepare(`DELETE FROM quads WHERE source_key = ?`).bind(row.sourceKey),
+        ...quads.map((q) =>
+          db
+            .prepare(
+              `INSERT INTO quads
+                 (source_key, subject, predicate, object, subject_label, object_label,
+                  entry_type, source_url)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .bind(
+              q.sourceKey,
+              q.subject,
+              q.predicate,
+              q.object,
+              q.subjectLabel ?? null,
+              q.objectLabel ?? null,
+              q.entryType ?? null,
+              q.sourceUrl ?? null,
+            ),
+        ),
+      ];
+      await db.batch(statements);
+    },
+  };
+}

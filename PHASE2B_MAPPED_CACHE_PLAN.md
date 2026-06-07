@@ -3,9 +3,11 @@
 > **Status: DONE.** Implemented in `functions/api/lookup.js` (shared mappers in
 > `src/providers/*.map.js`, shared `SCHEMA_VERSION` in `src/core/schemaVersion.js`),
 > with the browser providers now thin clients over `/api/lookup` and the Phase 1b
-> edge cache + per-provider proxies removed. Next up is **Phase 2 — graph
-> substrate** (see ARCHITECTURE.md phasing list). This doc is kept as the design
-> record.
+> edge cache + per-provider proxies removed. **Phase 2 (graph substrate) is now
+> also done** — the L2 value store became a D1 quad graph; see
+> [PHASE2_GRAPH_PLAN.md](./PHASE2_GRAPH_PLAN.md). Next up is **Phase 3 —
+> query-shaped traversal** (see ARCHITECTURE.md phasing list). This doc is kept as
+> the design record.
 
 The goal: collapse the two independent cache tiers — L1 (browser IndexedDB, mapped
 results) and L2 (server KV, raw HTTP responses from Phase 1b) — into **one shared
