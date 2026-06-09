@@ -40,6 +40,7 @@ functions/_lib/
 └── quadStore.js          D1 adapter: lookups + quads tables (the only raw SQL)
 
 src/core/quads.js         pure: mapped result ⇄ typed quads (decompose / reconstitute)
+src/core/closure.js       pure: identity-closure query over the graph (Phase 3a, dormant)
 migrations/0001_create_graph.sql   D1 schema
 ```
 
@@ -262,7 +263,18 @@ does not provide. So the cache track now has sub-phases before the graph work:
 5. **Phase 3 — query-shaped traversal.** Retire the BFS loop in favour of typed
    graph queries. `closure`, `via`, `viaChain` either disappear or become query
    metadata. The expansion _rules_ survive — they just move from control flow to
-   query constraints.
+   query constraints. Split into:
+   - **Phase 3a — substrate query layer (done).** `src/core/closure.js`
+     re-expresses the BFS rules as a pure query over the quad store, reading a
+     node's edges _across_ `source_key`s (`getQuadsTouching` in
+     `functions/_lib/quadStore.js`) so MB + Discogs union into one cross-provider
+     view — the cross-lookup edges Phase 2 deferred. Ships dormant: nothing in the
+     live path imports it; the browser BFS is untouched. Substrate-only, mirroring
+     Phase 2. See [PHASE3_QUERY_PLAN.md](./PHASE3_QUERY_PLAN.md).
+   - **Phase 3b — server-side traversal (pending).** A `/api/closure` endpoint
+     drives cold-node fetches, runs the query, and returns the expanded result; the
+     browser BFS is retired. Confronts the progressive-UI (streaming) decision.
+     Tracked in TODO.md.
 
 Each phase is shippable on its own. Each preserves the provider contract, the UI
 shell, the rate-limit queues, and the merge primitives.

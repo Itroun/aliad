@@ -7,6 +7,25 @@
 //   lookups — one row per (provider, normalisedName) lookup: freshness + is_empty.
 //   quads   — the decomposed edges, attributed to the producing lookup via
 //             source_key. Reconstitution selects a single source_key's quads.
+//
+// Phase 3a adds getQuadsTouching: the first read that crosses source_keys — it
+// gathers a node's edges in BOTH orientations across every lookup, which is what
+// the graph-query layer (src/core/closure.js) needs to reconstitute a node's
+// cross-provider view. Backed by idx_quads_subject / idx_quads_object.
+
+// Map a snake_case quads row back to the camelCase shape quads.js expects.
+function rowToQuad(r) {
+  return {
+    sourceKey: r.source_key,
+    subject: r.subject,
+    predicate: r.predicate,
+    object: r.object,
+    subjectLabel: r.subject_label,
+    objectLabel: r.object_label,
+    entryType: r.entry_type,
+    sourceUrl: r.source_url,
+  };
+}
 
 export function makeD1Store(db) {
   return {
@@ -32,17 +51,24 @@ export function makeD1Store(db) {
         )
         .bind(sourceKey)
         .all();
-      // Map snake_case columns back to the camelCase quad shape quads.js expects.
-      return (results ?? []).map((r) => ({
-        sourceKey: r.source_key,
-        subject: r.subject,
-        predicate: r.predicate,
-        object: r.object,
-        subjectLabel: r.subject_label,
-        objectLabel: r.object_label,
-        entryType: r.entry_type,
-        sourceUrl: r.source_url,
-      }));
+      return (results ?? []).map(rowToQuad);
+    },
+
+    // Cross-lookup read: every quad where `key` is the subject OR the object,
+    // across all source_keys. Both orientations matter — a node is the subject of
+    // its aka/groups/related edges but the OBJECT of the member_of edges that put
+    // its members under it. quads.js's quadsToResult buckets by orientation, so
+    // handing it this union reconstitutes the node's full cross-provider result.
+    async getQuadsTouching(key) {
+      const { results } = await db
+        .prepare(
+          `SELECT source_key, subject, predicate, object, subject_label, object_label,
+                  entry_type, source_url
+             FROM quads WHERE subject = ? OR object = ? ORDER BY rowid`,
+        )
+        .bind(key, key)
+        .all();
+      return (results ?? []).map(rowToQuad);
     },
 
     // Atomically replace a lookup and its quads. delete-then-insert keeps a
