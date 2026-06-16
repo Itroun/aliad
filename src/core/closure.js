@@ -1,18 +1,19 @@
-// Phase 3a — query-shaped traversal over the graph substrate.
+// Query-shaped identity traversal over the graph substrate (Phase 3a substrate,
+// Phase 3b live).
 //
-// This is the BFS in src/core/lookup.js (expandIdentityGraph / enqueueFromNode)
-// re-expressed as a query: the crown-jewel expansion RULES survive verbatim, but
-// each "look up this node" is now "read this node's edges from the graph" instead
-// of a network round-trip. No I/O lives here — like quads.js, the module is pure
-// and takes an injected async `neighbors(key)` accessor (the fetchFn-injection
-// convention used across the codebase), so tests drive it with an in-memory graph
-// and production wires it to functions/_lib/quadStore.js via quadsToResult.
+// The crown-jewel expansion RULES that used to live in src/core/lookup.js's BFS
+// now live HERE, re-expressed as a query: each "look up this node" is "read this
+// node's edges from the graph" instead of a network round-trip. No I/O lives here
+// — like quads.js, the module is pure and takes an injected async `neighbors`
+// accessor (the fetchFn-injection convention used across the codebase), so tests
+// drive it with an in-memory graph and production (functions/api/closure.js) wires
+// it to functions/_lib/quadStore.js via quadsToResult.
 //
-// Phase 3a ships this DORMANT — nothing imports it in the live path yet. The
-// browser BFS is untouched. The server endpoint that drives cold fetches and the
-// retirement of that BFS are Phase 3b (see TODO.md). What this proves now is that
-// the rules carry over to a graph query, and that reading a node's edges ACROSS
-// source_keys finally unions MB + Discogs into one cross-provider view — the
+// As of Phase 3b this is LIVE: functions/api/closure.js wires `neighbors` to
+// handleLookup (cold/expired fetch + write) + getQuadsTouching (cross-lookup
+// read), runs this query, and streams the walk back as SSE; the browser BFS in
+// src/core/lookup.js has been deleted. Reading a node's edges ACROSS source_keys
+// is what finally unions MB + Discogs into one cross-provider view — the
 // cross-lookup edges Phase 2 deliberately deferred.
 
 import { emptyResult } from '../providers/provider.js';
@@ -40,8 +41,16 @@ function shouldExpandAlias(alias) {
  *        (drives the union/skip rule).
  * @param {number} [opts.maxLookups]  Pathology guard (was MAX_EXPANSION_LOOKUPS).
  * @param {number} [opts.fanoutCap]    Per-node alias fan-out cap.
+ * @param {(merged) => void} [opts.onNode]  Fired with the running accumulated
+ *        result after each node is merged in — the streaming hook the SSE
+ *        endpoint uses to push progressive updates (mirrors lookup.js's
+ *        per-node onArtistDone). Not fired for the initial root read.
  * @param {(info: {skipped: number}) => void} [opts.onBudgetExhausted]
  * @returns {Promise<{merged, closure: Set<string>}>}  Same shape expandIdentityGraph returns.
+ *
+ * `neighbors` receives the ORIGINAL-cased name (root, then each alias/member
+ * name as it appears upstream) and normalises internally for its read — the
+ * server endpoint needs the original name to drive cold MB/Discogs searches.
  */
 export async function identityClosure(
   rootName,
@@ -50,6 +59,7 @@ export async function identityClosure(
     rootKeys = new Set(),
     maxLookups = DEFAULT_MAX_LOOKUPS,
     fanoutCap = DEFAULT_FANOUT_CAP,
+    onNode,
     onBudgetExhausted,
   } = {},
 ) {
@@ -57,7 +67,7 @@ export async function identityClosure(
   const visited = new Set();
   if (ownRootKey) visited.add(ownRootKey);
 
-  const initialMerged = (await neighbors(ownRootKey)) ?? emptyResult();
+  const initialMerged = (await neighbors(rootName)) ?? emptyResult();
   let accumulated = initialMerged;
   const pending = [];
   enqueueFromNode(pending, visited, initialMerged, [], rootKeys, fanoutCap, {
@@ -79,7 +89,7 @@ export async function identityClosure(
 
     budget--;
 
-    const nodeMerged = (await neighbors(key)) ?? emptyResult();
+    const nodeMerged = (await neighbors(item.name)) ?? emptyResult();
 
     // Suspected alias-of-group: a previous node listed this name as an alias, but
     // its own edges reveal members. Treat it as a group, not an identity of the
@@ -108,6 +118,7 @@ export async function identityClosure(
     };
 
     accumulated = mergeResults(accumulated, attributed);
+    onNode?.(accumulated);
 
     enqueueFromNode(pending, visited, nodeMerged, viaChain, rootKeys, fanoutCap, {
       parentKind: item.kind,

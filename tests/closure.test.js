@@ -26,7 +26,10 @@ function seedGraph(entries) {
 // providers into one entry (with aggregated sources).
 function neighborsFrom(store) {
   const calls = [];
-  const neighbors = async (key) => {
+  // identityClosure now hands neighbors the ORIGINAL-cased name (so the server
+  // can drive cold searches); normalise internally for the read + call log.
+  const neighbors = async (name) => {
+    const key = normaliseName(name);
     calls.push(key);
     return mergeResults(quadsToResult(key, await store.getQuadsTouching(key)));
   };
@@ -246,7 +249,8 @@ describe('identityClosure', () => {
   it('honours the budget cap and reports exhaustion on an unbounded chain', async () => {
     // Synthetic store: every node has exactly one alias to the next, forever.
     const calls = [];
-    const neighbors = async (key) => {
+    const neighbors = async (name) => {
+      const key = normaliseName(name);
       calls.push(key);
       // Letter suffix so each name normalises to a distinct, ever-growing key.
       return { ...empty, aliases: [{ name: `${key}z` }] };

@@ -1,12 +1,13 @@
 # Phase 3: Query-shaped traversal
 
-> **Status: Phase 3a DONE (substrate query layer). Phase 3b deferred.** The
-> identity-graph walk now exists as a pure query over the Phase 2 quad store
-> (`src/core/closure.js`), reading a node's edges _across_ `source_key`s so MB +
-> Discogs finally union into one cross-provider view. It ships **dormant** — the
-> browser BFS in `src/core/lookup.js` is untouched and still drives the live app.
-> The server endpoint, cold-fetch driving, and retiring the BFS are **Phase 3b**
-> (see the deferred section below and TODO.md).
+> **Status: Phase 3a + 3b DONE.** The identity-graph walk now runs **server-side**
+> as a query over the Phase 2 quad store. `src/core/closure.js` (`identityClosure`)
+> reads a node's edges _across_ `source_key`s so MB + Discogs union into one
+> cross-provider view; `functions/api/closure.js` drives cold/expired fetches
+> (via `handleLookup`) and streams the walk back as SSE; `src/core/lookup.js`'s
+> `lookupAll` is now a thin SSE client and the browser BFS is deleted. Decisions
+> taken: progressive UI = **SSE**, collab splitting = **client-side**. See the
+> "Phase 3b — what shipped" section below and TODO.md.
 
 ## Goal
 
@@ -79,17 +80,54 @@ union, person nodes not fanning out, multi-hop `viaChain`, alias-resolves-to-gro
 rejection, fan-out cap, root-skip union, budget exhaustion, and the new
 cross-provider node union.
 
-## Deferred to Phase 3b (tracked in TODO.md)
+## Phase 3b — what shipped
 
-- **`/api/closure` endpoint** that drives cold/expired-node fetches server-side
-  (the part `identityClosure` deliberately doesn't do — it queries whatever the
-  substrate holds), then runs the query and returns the expanded merged result.
-- **Freshness/expiry** integration during traversal (skip-or-refetch expired
-  nodes; stale-on-error), reusing the `lookups` row TTL fields.
-- **Retire the browser BFS** (`expandIdentityGraph`); the browser calls the
-  endpoint once per root.
-- **Progressive-UI decision**: SSE/streaming to preserve live per-node
-  `onProviderResult` / `onArtistDone` updates, vs. a single end-of-closure
-  response. This is the main UX fork — settle before building 3b.
-- **Collab splitting** (`splitCollab`) interplay once traversal is server-side.
-- Physical GC of dead D1 rows (pre-existing TODO item).
+### `/api/closure` SSE endpoint (`functions/api/closure.js`)
+
+`runClosure(env, { root, roots, fetchFn, store, emit })` is the plumbing-free core
+(mirroring `handleLookup`'s testability split). Its `neighbors(name)` accessor:
+
+1. For each provider, `await handleLookup(env, { provider, name, store, … })` —
+   reusing the entire Phase 2 cold/expired fetch + quad-write + HIT/MISS/STALE +
+   stale-on-error path. No fetch/freshness logic is duplicated here. It `emit`s a
+   `provider` SSE event per provider per node (carrying the cache label + that
+   provider's result, so the dev-probe shows per-provider counts as before).
+2. Reads the cross-provider union: `mergeResults(quadsToResult(key, await
+store.getQuadsTouching(key)))` — the Phase 3a cross-lookup read, now live.
+
+`identityClosure` then runs with an `onNode` hook that `emit`s `progress` (the
+running merged) and an `onBudgetExhausted` hook that `emit`s `budget`; the final
+`done` event carries `{ merged, closure, queried, errored }`. `onRequest` wraps
+this in a `text/event-stream` `ReadableStream`, applies a per-IP `closure`
+rate-limit scope, and propagates the client disconnect into upstream fetches.
+
+`identityClosure` was adjusted minimally: `neighbors` now receives the
+**original-cased** name (so the server can drive accurate MB/Discogs searches) and
+normalises internally, plus the new `onNode` streaming hook. The expansion rules
+are otherwise untouched.
+
+### Browser side (`src/core/lookup.js`)
+
+`lookupAll` keeps its public contract (same callbacks, same return shape) but its
+per-name pipeline is now `streamClosure`: it `fetch`es `/api/closure`, parses the
+SSE stream, and translates events back into `onProviderResult` / `onArtistDone` /
+`onBudgetExhausted`. The browser BFS (`expandIdentityGraph` / `enqueueFromNode`)
+and the per-provider rate-limit-queue + L1-cache machinery are **deleted** — the
+walk and its rules live solely server-side now. Collab splitting stays client-side:
+`splitCollab` rows open one stream per part + combo and merge here.
+
+### Tests
+
+`tests/closure-endpoint.test.js` drives `runClosure` with an in-memory D1 fake +
+injected `fetchFn`, asserting the event sequence, cold-fetch substrate writes, and
+cross-provider union. `tests/lookup.test.js` was reworked to stub `fetch` with a
+fake SSE stream (the walk rules are covered by `tests/closure.test.js`).
+`tests/lookupCache.test.js` was removed — it exercised the deleted L1-cache
+integration in `lookupAll`.
+
+## Still deferred (tracked in TODO.md)
+
+- Sweep out the now-dead L1 (IndexedDB) lookup wiring still constructed in
+  `main.js` and passed (ignored) to `lookupAll`.
+- `/api/closure` rate-limit tuning against real lineup sizes.
+- Physical GC of dead D1 rows (pre-existing Phase 2 item).

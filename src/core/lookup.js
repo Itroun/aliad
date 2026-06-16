@@ -1,31 +1,15 @@
-import { createCache } from './cache.js';
-import { dedupeNames, mergeResults, normaliseName } from './merge.js';
-import { createQueue } from './rateLimit.js';
+import { dedupeNames, mergeResults } from './merge.js';
 
-let _defaultCache = null;
-function defaultCache() {
-  if (!_defaultCache) _defaultCache = createCache();
-  return _defaultCache;
-}
-
-const EXPAND_SKIP_TYPES = new Set(['Search hint', 'Legal name']);
-const MAX_EXPANSION_LOOKUPS = 25;
-const ALIAS_FANOUT_CAP = 15;
-
-function shouldExpandAlias(alias) {
-  return !alias?.type || !EXPAND_SKIP_TYPES.has(alias.type);
-}
-
-// A provider lookup may make several upstream calls (search + details), each
-// with its own X-Cache outcome. Collapse them to the least-cached one so the
-// dev-probe tally reflects whether the lookup actually touched the network.
-function aggregateServerCache(values) {
-  if (!values?.length) return undefined;
-  if (values.includes('MISS')) return 'MISS';
-  if (values.includes('STALE')) return 'STALE';
-  if (values.includes('HIT')) return 'HIT';
-  return values[0];
-}
+// Phase 3b: the identity-graph walk runs SERVER-SIDE now. lookupAll no longer
+// touches providers or the L1 browser cache directly — for each lineup name it
+// opens an SSE stream to /api/closure (functions/api/closure.js), which drives
+// the cold/expired fetches, runs the closure query over the shared D1 quad
+// store, and streams progress back. This module keeps the public lookupAll
+// contract (same callbacks, same return shape) so the UI is untouched, plus the
+// client-side collab split: "X vs Y" rows call the endpoint once per part + the
+// combo and merge the streams here. The old browser BFS (expandIdentityGraph /
+// enqueueFromNode) and its per-provider rate-limit/cache machinery are gone —
+// the expansion rules now live solely in src/core/closure.js.
 
 // Festival lineups commonly use "X vs Y", "X b2b Y", "X & Y" for collab acts.
 // Providers don't know these combined names, so we look up the constituents
@@ -46,57 +30,19 @@ export function splitCollab(name) {
   return null;
 }
 
-export function lookupAll(names, providers, callbacks = {}) {
-  const { onArtistDone, onArtistComplete, signal, cache: injectedCache } = callbacks;
-  const persistent = injectedCache ?? defaultCache();
+// `providers` is kept for signature compatibility with the pre-3b call site but
+// is no longer consulted here — provider selection lives server-side. The `cache`
+// callback (L1 IndexedDB) is likewise ignored: D1 is the authoritative shared
+// cache now, surfaced to the dev-probe via the SSE `serverCache` label.
+export function lookupAll(names, _providers, callbacks = {}) {
+  const { onArtistDone, onArtistComplete } = callbacks;
   const unique = dedupeNames(names);
-  const rootKeys = new Set(unique.map(normaliseName).filter(Boolean));
-
-  const queued = providers.map((provider) => {
-    const queue = provider.minIntervalMs
-      ? createQueue({ minIntervalMs: provider.minIntervalMs })
-      : { run: (fn) => fn() };
-    const inRun = new Map();
-    const cachedLookup = async (name, opts) => {
-      const key = normaliseName(name);
-      // Collect the proxy's X-Cache outcome(s) for this lookup's network calls.
-      // Stays empty on an L1 (IndexedDB) hit, since provider.lookup isn't run.
-      const seen = [];
-      const optsWithMeta = {
-        ...opts,
-        recordMeta: (m) => {
-          if (m?.serverCache) seen.push(m.serverCache);
-        },
-      };
-      if (!key) {
-        const result = await queue.run(() => provider.lookup(name, optsWithMeta));
-        return {
-          result,
-          cached: false,
-          fromPersistent: false,
-          stale: false,
-          serverCache: aggregateServerCache(seen),
-        };
-      }
-      if (inRun.has(key)) {
-        const value = await inRun.get(key);
-        return { ...value, cached: true };
-      }
-      const promise = persistent.lookup(provider.name, key, {
-        fetch: () => queue.run(() => provider.lookup(name, optsWithMeta)),
-      });
-      inRun.set(key, promise);
-      const value = await promise;
-      return { ...value, serverCache: aggregateServerCache(seen) };
-    };
-    return { provider, cachedLookup };
-  });
+  // The full deduped lineup drives the endpoint's root-union/skip rule.
+  const roots = unique;
 
   return Promise.all(
     unique.map(async (name) => {
-      const combo = await runOnePipeline(name, queued, callbacks, rootKeys, {
-        reportName: name,
-      });
+      const combo = await streamClosure(name, roots, callbacks, { reportName: name });
 
       let merged = combo.merged;
       const closure = new Set(combo.closure);
@@ -107,7 +53,7 @@ export function lookupAll(names, providers, callbacks = {}) {
       const parts = splitCollab(name);
       if (parts) {
         const partResults = await Promise.all(
-          parts.map((p) => runOnePipeline(p, queued, callbacks, rootKeys, { reportName: null })),
+          parts.map((p) => streamClosure(p, roots, callbacks, { reportName: null })),
         );
         partResults.forEach((pr, i) => {
           merged = mergeResults(merged, pr.merged);
@@ -117,191 +63,83 @@ export function lookupAll(names, providers, callbacks = {}) {
         onArtistDone?.(name, merged);
       }
 
-      const queried = Object.keys(combo.initialOutcomes).filter((k) => combo.initialOutcomes[k].ok);
-      const errored = Object.keys(combo.initialOutcomes).filter(
-        (k) => !combo.initialOutcomes[k].ok,
-      );
-      onArtistComplete?.(name, merged, { queried, errored, closure });
+      onArtistComplete?.(name, merged, {
+        queried: combo.queried ?? [],
+        errored: combo.errored ?? [],
+        closure,
+      });
       return { name, merged, closure, sources, parts: parts ?? [] };
     }),
   );
 }
 
-async function runOnePipeline(name, queued, callbacks, rootKeys, { reportName }) {
-  const { onProviderResult, onArtistDone, signal } = callbacks;
-  const initialOutcomes = {};
-  const perProvider = await Promise.all(
-    queued.map(async ({ provider, cachedLookup }) => {
-      try {
-        const { result, cached, serverCache } = await cachedLookup(name, { signal });
-        initialOutcomes[provider.name] = { ok: true };
-        onProviderResult?.(name, provider.name, { ok: true, result, cached, serverCache });
-        return result;
-      } catch (error) {
-        initialOutcomes[provider.name] = { ok: false };
-        onProviderResult?.(name, provider.name, { ok: false, error, cached: false });
-        return null;
+// Open one /api/closure SSE stream and translate its events back into the
+// existing per-artist callbacks. Resolves { merged, closure, queried, errored }
+// from the terminal `done` event. `reportName` is the lineup row this stream's
+// progress should update (null for a collab part, whose name isn't a row).
+async function streamClosure(name, roots, callbacks, { reportName }) {
+  const { onProviderResult, onArtistDone, onBudgetExhausted, signal } = callbacks;
+
+  const params = new URLSearchParams();
+  params.set('root', name);
+  for (const r of roots) params.append('roots', r);
+
+  const res = await fetch(`/api/closure?${params.toString()}`, { signal });
+  if (!res.ok || !res.body) {
+    throw new Error(`closure request failed: ${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result = null;
+
+  const handle = (event, data) => {
+    switch (event) {
+      case 'provider':
+        onProviderResult?.(name, data.provider, {
+          ok: data.ok,
+          result: data.result,
+          via: data.via,
+          cached: data.cached,
+          serverCache: data.serverCache,
+          error: data.ok ? undefined : new Error('lookup failed'),
+        });
+        break;
+      case 'progress':
+        // Suppress progress routing for collab parts — the part's display name
+        // isn't a lineup row, so updates for it have nowhere useful to land.
+        if (reportName) onArtistDone?.(reportName, data.merged);
+        break;
+      case 'budget':
+        onBudgetExhausted?.(name, data);
+        break;
+      case 'done':
+        result = data;
+        break;
+      case 'error':
+        throw new Error(data.message || 'closure error');
+    }
+  };
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const block = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      let event = 'message';
+      let dataStr = '';
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
       }
-    }),
-  );
-  const merged0 = mergeResults(...perProvider.filter(Boolean));
-  if (reportName) onArtistDone?.(reportName, merged0);
-
-  // Suppress onArtistDone routing for part runs — the part's display name
-  // isn't a lineup row, so progress events for it have nowhere useful to land.
-  const expandCallbacks = reportName ? callbacks : { ...callbacks, onArtistDone: undefined };
-  const expanded = await expandIdentityGraph(name, merged0, queued, expandCallbacks, rootKeys);
-  return { merged: expanded.merged, closure: expanded.closure, initialOutcomes };
-}
-
-async function expandIdentityGraph(artistName, initialMerged, queued, callbacks, rootKeys) {
-  const { onArtistDone, onProviderResult, onBudgetExhausted, signal } = callbacks;
-  const ownRootKey = normaliseName(artistName);
-  const visited = new Set();
-  visited.add(ownRootKey);
-
-  let accumulated = initialMerged;
-  const pending = [];
-  enqueueFromNode(pending, visited, initialMerged, [], rootKeys, {
-    parentKind: null,
-    viaHadMemberStep: false,
-  });
-  let budget = MAX_EXPANSION_LOOKUPS;
-  const rejectedAliasKeys = new Set();
-
-  while (pending.length > 0 && budget > 0) {
-    const item = pending.shift();
-    const key = normaliseName(item.name);
-    if (!key || visited.has(key)) continue;
-    visited.add(key);
-
-    // Another root input's walk covers this identity sub-graph; recording the
-    // name in `visited` is enough for clustering to union the two roots.
-    if (rootKeys?.has(key) && key !== ownRootKey) continue;
-
-    budget--;
-
-    const perProvider = await Promise.all(
-      queued.map(async ({ provider, cachedLookup }) => {
-        try {
-          const { result, cached, serverCache } = await cachedLookup(item.name, { signal });
-          onProviderResult?.(artistName, provider.name, {
-            ok: true,
-            result,
-            via: item.name,
-            cached,
-            serverCache,
-          });
-          return result;
-        } catch (error) {
-          onProviderResult?.(artistName, provider.name, {
-            ok: false,
-            error,
-            via: item.name,
-            cached: false,
-          });
-          return null;
-        }
-      }),
-    );
-
-    const nodeMerged = mergeResults(...perProvider.filter(Boolean));
-
-    // Suspected alias-of-group: a previous node listed `item.name` as an alias,
-    // but the lookup reveals it has its own membership. Treat it as a group,
-    // not as an identity-equivalent of the root. Skip attribution and don't
-    // fan into co-members — otherwise collaborators leak in as apparent
-    // aliases of the root (e.g. Discogs lists a duo's project as an alias of
-    // each member, and walking that node's members swaps the two members).
-    const looksLikeGroup = (nodeMerged.members ?? []).length > 0;
-    if (item.kind === 'alias' && looksLikeGroup) {
-      // Also strip from accumulated.aliases so downstream graph-build doesn't
-      // treat this name as an aka of the root (e.g. a duo project listed as
-      // an alias of one member would otherwise bridge the member to the
-      // duo's other collaborator's bands as "aka <duo project>").
-      rejectedAliasKeys.add(key);
-      continue;
-    }
-
-    const viaChain = [item.name, ...item.viaChain];
-    const via = item.name;
-    const viaHadMemberStep = !!item.viaHadMemberStep;
-
-    const attributed = {
-      aliases: [],
-      groups: nodeMerged.groups.map((e) => ({ ...e, via, viaChain, viaHadMemberStep })),
-      members: nodeMerged.members.map((e) => ({ ...e, via, viaChain, viaHadMemberStep })),
-      relatedProjects: nodeMerged.relatedProjects.map((e) => ({
-        ...e,
-        via,
-        viaChain,
-        viaHadMemberStep,
-      })),
-    };
-
-    accumulated = mergeResults(accumulated, attributed);
-    onArtistDone?.(artistName, accumulated);
-
-    enqueueFromNode(pending, visited, nodeMerged, viaChain, rootKeys, {
-      parentKind: item.kind,
-      viaHadMemberStep,
-    });
-  }
-
-  if (budget === 0 && pending.length > 0) {
-    onBudgetExhausted?.(artistName, { skipped: pending.length });
-  }
-
-  if (rejectedAliasKeys.size > 0) {
-    accumulated = {
-      ...accumulated,
-      aliases: accumulated.aliases.filter((a) => !rejectedAliasKeys.has(normaliseName(a?.name))),
-    };
-  }
-
-  return { merged: accumulated, closure: visited };
-}
-
-function enqueueFromNode(pending, visited, node, viaChain, rootKeys, ctx = {}) {
-  const { parentKind = null, viaHadMemberStep = false } = ctx;
-  const walkableAliases = (node.aliases ?? []).filter(shouldExpandAlias);
-  if (walkableAliases.length > ALIAS_FANOUT_CAP) {
-    // Prolific-artist cap: register names in the closure so lineup matches
-    // still get detected, but don't walk into each alias. Without this, a
-    // node with 50+ pseudonyms (e.g. M.I.K.E. on Discogs) eats the whole
-    // expansion budget on redundant lookups of the same underlying artist.
-    for (const alias of walkableAliases) {
-      const key = normaliseName(alias?.name);
-      if (key) visited.add(key);
-    }
-  } else {
-    for (const alias of walkableAliases) {
-      const key = normaliseName(alias?.name);
-      if (!key || visited.has(key)) continue;
-      pending.push({ name: alias.name, viaChain, kind: 'alias', viaHadMemberStep });
+      if (dataStr) handle(event, JSON.parse(dataStr));
     }
   }
-  // Follow members only when the node is itself a group AND we did not arrive
-  // here via an alias hop. Walking members of an alias-reached node would turn
-  // co-collaborators into apparent aliases of the root identity.
-  if (parentKind !== 'alias' && (node.members ?? []).length > 0) {
-    for (const member of node.members) {
-      const key = normaliseName(member?.name);
-      if (!key || visited.has(key)) continue;
-      pending.push({ name: member.name, viaChain, kind: 'member', viaHadMemberStep: true });
-    }
-  }
-  // Don't walk groups/relatedProjects in general (would fan out across every
-  // session credit a prolific person has), but if one is itself a lineup root
-  // we want it in the closure — enqueueing lets the root-skip rule register
-  // it in `visited` without spending budget on a redundant lookup.
-  if (rootKeys) {
-    for (const bucket of [node.groups, node.relatedProjects]) {
-      for (const entry of bucket ?? []) {
-        const key = normaliseName(entry?.name);
-        if (!key || visited.has(key) || !rootKeys.has(key)) continue;
-        pending.push({ name: entry.name, viaChain, kind: 'alias', viaHadMemberStep });
-      }
-    }
-  }
+
+  if (!result) throw new Error('closure stream ended without a result');
+  return result;
 }
