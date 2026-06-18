@@ -74,7 +74,7 @@ describe('lookupAll', () => {
     const providerCalls = [];
     const doneCalls = [];
     let complete = null;
-    const [result] = await lookupAll(['Foo'], [], {
+    const [result] = await lookupAll(['Foo'], {
       onProviderResult: (artist, provider, outcome) =>
         providerCalls.push({ artist, provider, serverCache: outcome.serverCache, ok: outcome.ok }),
       onArtistDone: (artist, m) => doneCalls.push({ artist, groups: m.groups.length }),
@@ -102,7 +102,7 @@ describe('lookupAll', () => {
       ],
     });
     const budget = [];
-    await lookupAll(['Root'], [], {
+    await lookupAll(['Root'], {
       onBudgetExhausted: (artist, info) => budget.push({ artist, skipped: info.skipped }),
     });
     expect(budget).toEqual([{ artist: 'Root', skipped: 7 }]);
@@ -117,7 +117,7 @@ describe('lookupAll', () => {
       ],
     });
     const outcomes = [];
-    const [result] = await lookupAll(['Foo'], [], {
+    const [result] = await lookupAll(['Foo'], {
       onProviderResult: (_a, provider, o) => outcomes.push({ provider, ok: o.ok }),
     });
     expect(outcomes).toContainEqual({ provider: 'musicbrainz', ok: false });
@@ -135,7 +135,7 @@ describe('lookupAll', () => {
       Ultravibe: [['done', { merged: empty, closure: ['ultravibe'], queried: [], errored: [] }]],
     });
 
-    const [combo] = await lookupAll(['Skizologic vs Filteria', 'Ultravibe'], []);
+    const [combo] = await lookupAll(['Skizologic vs Filteria', 'Ultravibe']);
     expect(combo.parts).toEqual(['Skizologic', 'Filteria']);
     // The combo absorbs the constituents' data and closures.
     expect(combo.merged.groups.map((g) => g.name)).toContain('Suntrip');
@@ -151,12 +151,12 @@ describe('lookupAll', () => {
 
   it('rejects when the stream emits an error event', async () => {
     stubFetch({ Foo: [['error', { message: 'Graph substrate unavailable' }]] });
-    await expect(lookupAll(['Foo'], [])).rejects.toThrow('Graph substrate unavailable');
+    await expect(lookupAll(['Foo'])).rejects.toThrow('Graph substrate unavailable');
   });
 
   it('rejects when the stream ends without a done event', async () => {
     stubFetch({ Foo: [['progress', { merged: empty }]] });
-    await expect(lookupAll(['Foo'], [])).rejects.toThrow('without a result');
+    await expect(lookupAll(['Foo'])).rejects.toThrow('without a result');
   });
 });
 

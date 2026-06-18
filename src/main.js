@@ -6,10 +6,7 @@ import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
 import { detectInputType, extractArtists } from './core/extract.js';
 import { cleanHTML } from './core/cleanHTML.js';
-import * as musicbrainz from './providers/musicbrainz.js';
-import * as discogs from './providers/discogs.js';
 
-const providers = [musicbrainz, discogs];
 const app = document.querySelector('#app');
 const devProbe = createDevProbe();
 if (devProbe.el) document.body.append(devProbe.el);
@@ -83,7 +80,7 @@ async function handleSubmit(input) {
     replaceGraphScreen(graph);
     setView('graph');
 
-    await lookupAll(artists, providers, {
+    await lookupAll(artists, {
       signal,
       onProviderResult: (artist, provider, outcome) => {
         if (signal.aborted) return;

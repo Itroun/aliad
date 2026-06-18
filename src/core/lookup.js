@@ -30,11 +30,9 @@ export function splitCollab(name) {
   return null;
 }
 
-// `providers` is kept for signature compatibility with the pre-3b call site but
-// is no longer consulted here — provider selection lives server-side. The `cache`
-// callback (L1 IndexedDB) is likewise ignored: D1 is the authoritative shared
-// cache now, surfaced to the dev-probe via the SSE `serverCache` label.
-export function lookupAll(names, _providers, callbacks = {}) {
+// Provider selection lives server-side now (the walk runs over /api/closure), so
+// lookupAll just takes the lineup names and the progress callbacks.
+export function lookupAll(names, callbacks = {}) {
   const { onArtistDone, onArtistComplete } = callbacks;
   const unique = dedupeNames(names);
   // The full deduped lineup drives the endpoint's root-union/skip rule.
