@@ -87,7 +87,11 @@ async function handleSubmit(input) {
       signal,
       onProviderResult: (artist, provider, outcome) => {
         if (signal.aborted) return;
-        devProbe.note(formatProviderNote(artist, provider, outcome));
+        devProbe.providerResult(artist, {
+          line: formatProviderNote(artist, provider, outcome),
+          ok: outcome.ok,
+          serverCache: outcome.serverCache,
+        });
         if (outcome.serverCache) devProbe.serverCache(outcome.serverCache);
       },
       onArtistDone: (artist, merged) => {
@@ -216,7 +220,10 @@ async function callProxy(url, mode, signal) {
 }
 
 function formatProviderNote(artist, provider, outcome) {
-  const label = outcome.via ? `${artist} (via ${outcome.via})` : artist;
+  // The act name is the group heading in the dev-probe, so the per-node detail
+  // only needs the hop: `via X` for an expanded node, or the bare provider for
+  // the root's own lookup.
+  const label = outcome.via ? `via ${outcome.via}` : 'root';
   const serverTag = outcome.serverCache ? ` · L2:${outcome.serverCache}` : '';
   const suffix = (outcome.cached ? ' · cached' : '') + serverTag;
   if (!outcome.ok) {

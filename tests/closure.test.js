@@ -304,7 +304,7 @@ describe('identityClosure', () => {
   // George Clinton's alias). That bare alias stub points at George Clinton, whose
   // whole P-Funk discography would otherwise flood the closure.
   it('stops a poisoned bare alias from dragging in a foreign discography', async () => {
-    const { merged, closure } = await run(
+    const { merged, closure, calls } = await run(
       'Laughing Buddha',
       [
         { name: 'Laughing Buddha', result: { ...empty, members: [{ name: 'Bill Halsey' }] } },
@@ -337,6 +337,8 @@ describe('identityClosure', () => {
     expect(groupNames).not.toContain('Funkadelic');
     // ...and the walk doesn't continue past the rejected hub.
     expect(closure.has('uncle jam')).toBe(false);
+    // ...the foreign hub isn't even read (band-less bridge is registered, not walked).
+    expect(calls).not.toContain('george clinton');
     // ...while the legit alias's overlapping band still comes through.
     expect(groupNames).toContain('Cosmosis');
   });

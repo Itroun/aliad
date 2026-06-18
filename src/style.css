@@ -859,3 +859,22 @@ body > #app {
 .dev-probe-item.state-ok {
   color: var(--accent);
 }
+
+/* Per-act collapsible groups: summary is the at-a-glance row, details are the
+   per-node walk lines (collapsed by default). */
+.dev-probe summary {
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.dev-probe summary.state-fail {
+  color: #c66;
+}
+
+.dev-probe-detail {
+  padding: 1px 0 1px 12px;
+}
+
+.dev-probe-detail.state-fail {
+  color: #c66;
+}

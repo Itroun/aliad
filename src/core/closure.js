@@ -54,6 +54,16 @@ function setsIntersect(a, b) {
   return false;
 }
 
+// Add a node's walkable alias names to the closure WITHOUT enqueueing them for a
+// read — used where we want lineup-root matches to still cluster but don't want
+// to spend lookups walking the aliases (fan-out cap; band-less stubs).
+function registerWalkableAliases(visited, node) {
+  for (const alias of (node?.aliases ?? []).filter(shouldExpandAlias)) {
+    const key = normaliseName(alias?.name);
+    if (key) visited.add(key);
+  }
+}
+
 /**
  * Identity-closure query for one root over the graph.
  *
@@ -167,6 +177,17 @@ export async function identityClosure(
       continue;
     }
 
+    // Band-less alias stub under an established cluster: it can only point back to
+    // known members (already visited) or into a foreign identity's mutually-aka'd
+    // satellite clique (reverse edges) we don't want to read. Register its alias
+    // names so lineup-root matches still cluster, but don't fan into them. Before
+    // the cluster has any bands we still fan, so a band-less root chain can reach
+    // its first real identity (A aka B aka C-with-a-band).
+    if (item.kind === 'alias' && connKeys.size === 0 && clusterHasProjects) {
+      registerWalkableAliases(visited, nodeMerged);
+      continue;
+    }
+
     const viaChain = [item.name, ...item.viaChain];
     const via = item.name;
     const viaHadMemberStep = !!item.viaHadMemberStep;
@@ -221,10 +242,7 @@ function enqueueFromNode(pending, visited, node, viaChain, rootKeys, fanoutCap, 
   if (walkableAliases.length > fanoutCap) {
     // Prolific-artist cap: register names in the closure so lineup matches still
     // get detected, but don't walk into each alias of one underlying artist.
-    for (const alias of walkableAliases) {
-      const key = normaliseName(alias?.name);
-      if (key) visited.add(key);
-    }
+    registerWalkableAliases(visited, node);
   } else {
     for (const alias of walkableAliases) {
       const key = normaliseName(alias?.name);
