@@ -298,4 +298,59 @@ describe('identityClosure', () => {
     expect(node.groups.map((g) => g.name)).toEqual(['Fly Agaric']);
     expect(node.members.map((m) => m.name).sort()).toEqual(['Erez Aizen', 'Erez Eisen']);
   });
+
+  // Foreign-identity guard. Models the real psytrance bug: a correct artist page
+  // (Bill Halsey) carries a poisoned name-variation ("Dr. Funkenstein", actually
+  // George Clinton's alias). That bare alias stub points at George Clinton, whose
+  // whole P-Funk discography would otherwise flood the closure.
+  it('stops a poisoned bare alias from dragging in a foreign discography', async () => {
+    const { merged, closure } = await run(
+      'Laughing Buddha',
+      [
+        { name: 'Laughing Buddha', result: { ...empty, members: [{ name: 'Bill Halsey' }] } },
+        {
+          name: 'Bill Halsey',
+          result: {
+            ...empty,
+            groups: [{ name: 'Laughing Buddha' }, { name: 'Cosmosis' }],
+            // Dr. Funkenstein is the poisoned variation; WBH is a legit alias.
+            aliases: [{ name: 'Dr. Funkenstein' }, { name: 'William Bryan Halsey' }],
+          },
+        },
+        // Bare bridge: no bands of its own, just points onward to George Clinton.
+        { name: 'Dr. Funkenstein', result: { ...empty, aliases: [{ name: 'George Clinton' }] } },
+        {
+          name: 'George Clinton',
+          result: {
+            ...empty,
+            groups: [{ name: 'Parliament' }, { name: 'Funkadelic' }],
+            aliases: [{ name: 'Uncle Jam' }],
+          },
+        },
+        { name: 'William Bryan Halsey', result: { ...empty, groups: [{ name: 'Cosmosis' }] } },
+      ],
+      { rootKeys: new Set(['laughing buddha']) },
+    );
+    const groupNames = merged.groups.map((g) => g.name);
+    // The foreign discography is kept out...
+    expect(groupNames).not.toContain('Parliament');
+    expect(groupNames).not.toContain('Funkadelic');
+    // ...and the walk doesn't continue past the rejected hub.
+    expect(closure.has('uncle jam')).toBe(false);
+    // ...while the legit alias's overlapping band still comes through.
+    expect(groupNames).toContain('Cosmosis');
+  });
+
+  it('still discovers a different band via a direct alias of a band-bearing node', async () => {
+    // The legit case the guard must NOT block: a person in BandA whose alias is in
+    // a wholly different BandB. Reached straight from a band-bearing node, so kept.
+    const { merged } = await run('Doof', [
+      {
+        name: 'Doof',
+        result: { ...empty, groups: [{ name: 'BandA' }], aliases: [{ name: 'Nick Barber' }] },
+      },
+      { name: 'Nick Barber', result: { ...empty, groups: [{ name: 'BandB' }] } },
+    ]);
+    expect(merged.groups.map((g) => g.name)).toContain('BandB');
+  });
 });

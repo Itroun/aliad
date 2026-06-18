@@ -29,6 +29,31 @@ function shouldExpandAlias(alias) {
   return !alias?.type || !EXPAND_SKIP_TYPES.has(alias.type);
 }
 
+// Shared-band signal for the foreign-identity guard: the groups a node is in
+// plus its related projects. Deliberately EXCLUDES:
+//   - `aka`: a poisoned alias string can appear verbatim on two unrelated pages
+//     (e.g. a George Clinton alias mistakenly added to another artist), so
+//     shared alias strings would create false overlap; shared bands do not.
+//   - `members`: those are PEOPLE in a group, not bands the identity shares —
+//     counting them lets a group's member roster masquerade as project overlap.
+// An `aka` hop is person↔person, so common BANDS are the right same-identity tell
+// (a group reached via alias is already handled by the looksLikeGroup rule).
+function connectionKeys(node) {
+  const keys = new Set();
+  for (const bucket of [node?.groups, node?.relatedProjects]) {
+    for (const entry of bucket ?? []) {
+      const key = normaliseName(entry?.name);
+      if (key) keys.add(key);
+    }
+  }
+  return keys;
+}
+
+function setsIntersect(a, b) {
+  for (const x of a) if (b.has(x)) return true;
+  return false;
+}
+
 /**
  * Identity-closure query for one root over the graph.
  *
@@ -77,6 +102,26 @@ export async function identityClosure(
   let budget = maxLookups;
   const rejectedAliasKeys = new Set();
 
+  // Projects that anchor this root's identity cluster. An `aka` hop asserts
+  // "same person", so the resolved node should share at least one project with
+  // the cluster. A node that brings ONLY foreign projects (a bad/ambiguous alias
+  // string that resolves to an unrelated, often prolific artist) is rejected —
+  // this stops a single poisoned alias edge from dragging a whole foreign
+  // discography into the closure. Seeded from the root (and all lineup roots);
+  // grows as nodes are accepted, so legit multi-hop chains keep discovering.
+  const clusterConnections = new Set([ownRootKey, ...rootKeys].filter(Boolean));
+  // The guard only fires once the cluster has at least one real project to judge
+  // against — otherwise a legit alias-only chain whose first project appears
+  // several hops in (A aka B aka C-with-a-group) would be cut at the project.
+  let clusterHasProjects = false;
+  const addConnections = (keys) => {
+    for (const key of keys) {
+      clusterConnections.add(key);
+      clusterHasProjects = true;
+    }
+  };
+  addConnections(connectionKeys(initialMerged));
+
   while (pending.length > 0 && budget > 0) {
     const item = pending.shift();
     const key = normaliseName(item.name);
@@ -101,6 +146,27 @@ export async function identityClosure(
       continue;
     }
 
+    // Foreign-identity guard (alias hops only). Reject a node that has bands of
+    // its own, shares NONE with the cluster, AND was reached through a band-less
+    // alias bridge. That combination is the signature of a poisoned alias edge: a
+    // junk name-variation resolves to a bare stub that then points at an
+    // unrelated (often prolific) artist, dragging in a whole foreign discography.
+    // We DON'T reject merely-non-overlapping nodes reached straight from a
+    // band-bearing node — that's the legit "same person, different band" case
+    // alias-walking exists to find. The clusterHasProjects gate lets a band-less
+    // root chain (A aka B aka C-with-a-band) define its cluster from C.
+    const connKeys = connectionKeys(nodeMerged);
+    if (
+      item.kind === 'alias' &&
+      connKeys.size > 0 &&
+      clusterHasProjects &&
+      !item.parentHasBands &&
+      !setsIntersect(connKeys, clusterConnections)
+    ) {
+      rejectedAliasKeys.add(key);
+      continue;
+    }
+
     const viaChain = [item.name, ...item.viaChain];
     const via = item.name;
     const viaHadMemberStep = !!item.viaHadMemberStep;
@@ -119,6 +185,10 @@ export async function identityClosure(
 
     accumulated = mergeResults(accumulated, attributed);
     onNode?.(accumulated);
+
+    // Accepted node's projects extend the cluster, so later alias hops can
+    // overlap with identities discovered mid-walk, not just the root.
+    addConnections(connKeys);
 
     enqueueFromNode(pending, visited, nodeMerged, viaChain, rootKeys, fanoutCap, {
       parentKind: item.kind,
@@ -142,6 +212,11 @@ export async function identityClosure(
 
 function enqueueFromNode(pending, visited, node, viaChain, rootKeys, fanoutCap, ctx = {}) {
   const { parentKind = null, viaHadMemberStep = false } = ctx;
+  // Whether THIS node has bands of its own — propagated to its hops so the
+  // foreign-identity guard can tell a legit "same person, different band" alias
+  // (hopped from a band-bearing node) from a poisoned bridge (a band-less alias
+  // stub that resolves to an unrelated artist).
+  const parentHasBands = connectionKeys(node).size > 0;
   const walkableAliases = (node.aliases ?? []).filter(shouldExpandAlias);
   if (walkableAliases.length > fanoutCap) {
     // Prolific-artist cap: register names in the closure so lineup matches still
@@ -154,7 +229,7 @@ function enqueueFromNode(pending, visited, node, viaChain, rootKeys, fanoutCap, 
     for (const alias of walkableAliases) {
       const key = normaliseName(alias?.name);
       if (!key || visited.has(key)) continue;
-      pending.push({ name: alias.name, viaChain, kind: 'alias', viaHadMemberStep });
+      pending.push({ name: alias.name, viaChain, kind: 'alias', viaHadMemberStep, parentHasBands });
     }
   }
   // Follow members only when the node is itself a group AND we did not arrive via
@@ -164,7 +239,13 @@ function enqueueFromNode(pending, visited, node, viaChain, rootKeys, fanoutCap, 
     for (const member of node.members) {
       const key = normaliseName(member?.name);
       if (!key || visited.has(key)) continue;
-      pending.push({ name: member.name, viaChain, kind: 'member', viaHadMemberStep: true });
+      pending.push({
+        name: member.name,
+        viaChain,
+        kind: 'member',
+        viaHadMemberStep: true,
+        parentHasBands,
+      });
     }
   }
   // Don't walk groups/relatedProjects in general (would fan out across every
@@ -175,7 +256,7 @@ function enqueueFromNode(pending, visited, node, viaChain, rootKeys, fanoutCap, 
     for (const entry of bucket ?? []) {
       const key = normaliseName(entry?.name);
       if (!key || visited.has(key) || !rootKeys.has(key)) continue;
-      pending.push({ name: entry.name, viaChain, kind: 'alias', viaHadMemberStep });
+      pending.push({ name: entry.name, viaChain, kind: 'alias', viaHadMemberStep, parentHasBands });
     }
   }
 }
