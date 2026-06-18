@@ -3,7 +3,7 @@ import {
   checkRateLimit,
   checkDailyCeiling,
   incrementDailyCeiling,
-} from '../functions/_lib/kvLimit.js';
+} from '../server/_lib/kvLimit.js';
 
 function fakeKV(initial = {}) {
   const store = new Map(Object.entries(initial));

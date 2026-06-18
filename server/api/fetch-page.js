@@ -65,7 +65,7 @@ export function looksLikeChallenge(text) {
   return false;
 }
 
-export async function onRequest(context) {
+export async function handle(context) {
   const { request, env } = context;
 
   if (request.method !== 'GET') {

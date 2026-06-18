@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runClosure } from '../functions/api/closure.js';
+import { runClosure } from '../server/api/closure.js';
 import { resultToQuads, sourceKeyFor } from '../src/core/quads.js';
 import { normaliseName } from '../src/core/merge.js';
 import { SCHEMA_VERSION } from '../src/core/schemaVersion.js';

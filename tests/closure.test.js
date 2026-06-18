@@ -7,7 +7,7 @@ import { mergeResults, normaliseName } from '../src/core/merge.js';
 // each through resultToQuads — the same write path the endpoint uses — so these
 // tests exercise the round-trip (decompose → store → reconstitute) AND the
 // traversal together. getQuadsTouching mirrors the real D1 cross-lookup query
-// (functions/_lib/quadStore.js): every quad where `key` is subject OR object.
+// (server/_lib/quadStore.js): every quad where `key` is subject OR object.
 function seedGraph(entries) {
   const quads = [];
   for (const { provider = 'p', name, result } of entries) {

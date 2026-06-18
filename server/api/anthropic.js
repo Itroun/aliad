@@ -9,7 +9,7 @@ const RATE_WINDOW_SEC = 60;
 const DEFAULT_DAILY_REQUEST_LIMIT = 300;
 const DAILY_COUNTER_KEY = 'anthropic:usage';
 
-export async function onRequest(context) {
+export async function handle(context) {
   const { request, env } = context;
 
   if (request.method !== 'POST') {

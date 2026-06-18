@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fetchWithRetry, isBlockedHost, looksLikeChallenge } from '../functions/api/fetch-page.js';
+import { fetchWithRetry, isBlockedHost, looksLikeChallenge } from '../server/api/fetch-page.js';
 
 function resp(status, { retryAfter } = {}) {
   return {

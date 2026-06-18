@@ -109,7 +109,7 @@ export async function runClosure(
   emit('done', { merged, closure: [...closure], queried, errored });
 }
 
-export async function onRequest(context) {
+export async function handle(context) {
   const { request, env } = context;
 
   if (request.method !== 'GET') {

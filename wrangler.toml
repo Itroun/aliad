@@ -1,10 +1,16 @@
 name = "aka"
+main = "server/index.js"
 compatibility_date = "2025-01-01"
-pages_build_output_dir = "dist"
+
+# Static assets: the built Vite app in dist/. Requests that don't match an asset
+# fall through to the Worker (server/index.js), which owns the /api/* routes.
+[assets]
+directory = "./dist"
+binding = "ASSETS"
 
 # KV namespace for rate limiting and the Anthropic daily request ceiling.
 # Local dev uses a filesystem-backed KV so the `id` here is a placeholder.
-# Before deploying, run `npx wrangler kv:namespace create aka-kv` and replace
+# Before deploying, run `npx wrangler kv namespace create aka-kv` and replace
 # the id below with the real 32-char namespace id.
 [[kv_namespaces]]
 binding = "KV"
@@ -19,3 +25,15 @@ id = "local-placeholder-replace-before-deploy"
 binding = "DB"
 database_name = "aka-graph"
 database_id = "local-placeholder-replace-before-deploy"
+
+# Global Discogs rate limiter (server/rateLimiter.js). A single DO instance gives
+# a strongly-consistent token bucket shared across all parallel /api/closure
+# requests — the only primitive that holds the 60/min budget under burst.
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+# SQLite-backed DO class so it stays on the free plan (no storage charge on free).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]

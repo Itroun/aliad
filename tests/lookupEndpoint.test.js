@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { handleLookup } from '../functions/api/lookup.js';
+import { handleLookup } from '../server/api/lookup.js';
 import { SCHEMA_VERSION } from '../src/core/schemaVersion.js';
 
-// In-memory stand-in for the D1 quad store (functions/_lib/quadStore.js),
+// In-memory stand-in for the D1 quad store (server/_lib/quadStore.js),
 // mirroring how earlier tests used a fakeKV. getLookup returns rows in the
 // snake_case shape the real D1 adapter yields.
 function fakeStore() {

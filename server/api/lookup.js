@@ -15,6 +15,7 @@
 // for rate limiting + the Anthropic ceiling. See PHASE2_GRAPH_PLAN.md.
 
 import { checkRateLimit } from '../_lib/kvLimit.js';
+import { awaitDiscogsSlot } from '../_lib/rateGate.js';
 import { makeD1Store } from '../_lib/quadStore.js';
 import { SCHEMA_VERSION } from '../../src/core/schemaVersion.js';
 import { normaliseName } from '../../src/core/merge.js';
@@ -55,6 +56,9 @@ const PROVIDERS = {
   },
   discogs: {
     rateLimit: { scope: 'discogs', limit: 60, windowSec: 60 },
+    // Gate upstream calls through the global RateLimiter DO. MB is left
+    // best-effort (CLAUDE.md rate-limits note); only Discogs 429s in practice.
+    gated: true,
     requiresToken: true,
     headers: (env) => ({
       Authorization: `Discogs token=${env.DISCOGS_TOKEN}`,
@@ -89,9 +93,14 @@ async function getJson(url, headers, fetchFn, retry, sleep) {
 // the same selection/mapping as the browser used to, now server-side.
 async function lookupUpstream(cfg, env, name, fetchFn, sleep) {
   const headers = cfg.headers(env);
+  // Each upstream HTTP request consumes one slot from the global gate, so the
+  // budget tracks what Discogs actually counts (search AND details).
+  const gate = () => (cfg.gated ? awaitDiscogsSlot(env, { sleep }) : undefined);
+  await gate();
   const searchData = await getJson(cfg.searchUrl(name), headers, fetchFn, cfg.retry, sleep);
   const match = cfg.pickMatch(searchData, name);
   if (!match) return emptyResult();
+  await gate();
   const details = await getJson(cfg.detailsUrl(match.id), headers, fetchFn, cfg.retry, sleep);
   return cfg.mapDetails(details);
 }
@@ -176,7 +185,7 @@ export async function handleLookup(
   return ok(result, 'MISS');
 }
 
-export async function onRequest(context) {
+export async function handle(context) {
   const { request, env } = context;
 
   if (request.method !== 'GET') {
