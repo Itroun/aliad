@@ -1,7 +1,7 @@
-// Shared cache schema version. Governs BOTH tiers of the unified cache:
-//   L1 — the browser IndexedDB cache (src/core/cache.js)
-//   L2 — the server KV cache (functions/api/lookup.js)
-// Both key on (provider, normalisedName) and store the same mapped-result shape,
-// so bumping this single constant invalidates every entry in both tiers
-// coherently (old entries TTL out; no migration). See PHASE2B_MAPPED_CACHE_PLAN.md.
+// Cache schema version for the shared L2 store (the D1 quad store behind
+// server/api/lookup.js). Entries key on (provider, normalisedName) and store the
+// same mapped-result shape, so bumping this single constant invalidates every
+// entry coherently (old entries TTL out; no migration). The former L1 browser
+// IndexedDB cache was removed once the identity walk moved server-side.
+// See PHASE2B_MAPPED_CACHE_PLAN.md.
 export const SCHEMA_VERSION = 1;

@@ -3,7 +3,6 @@ const NOOP_PROBE = {
   reset() {},
   onAttempt() {},
   note() {},
-  cache() {},
   serverCache() {},
 };
 
@@ -22,13 +21,11 @@ export function createDevProbe() {
   el.append(heading, list);
 
   const rows = new Map();
-  let cacheRow = null;
   let serverCacheRow = null;
   const serverTally = { HIT: 0, MISS: 0, STALE: 0 };
 
   function reset() {
     rows.clear();
-    cacheRow = null;
     serverCacheRow = null;
     serverTally.HIT = 0;
     serverTally.MISS = 0;
@@ -70,22 +67,9 @@ export function createDevProbe() {
     list.append(li);
   }
 
-  function cache(stats) {
-    if (!stats) return;
-    el.hidden = false;
-    if (!cacheRow) {
-      cacheRow = document.createElement('li');
-      cacheRow.className = 'dev-probe-item state-info';
-      list.append(cacheRow);
-    }
-    cacheRow.textContent =
-      `cache · hits=${stats.hits} · misses=${stats.misses}` +
-      ` · stale=${stats.stale} · writes=${stats.writes}`;
-  }
-
-  // Rolling tally of the shared L2 (proxy) cache outcomes, distinct from the
-  // per-browser L1 (IndexedDB) `cache` row above. Run a lineup in a second
-  // browser to see HITs climb — that proves the cross-visitor cache works.
+  // Rolling tally of the shared L2 (D1 quad store) cache outcomes. Run a lineup
+  // in a second browser to see HITs climb — that proves the cross-visitor cache
+  // works.
   function serverCache(outcome) {
     if (!outcome || !(outcome in serverTally)) return;
     serverTally[outcome]++;
@@ -100,5 +84,5 @@ export function createDevProbe() {
       ` · MISS=${serverTally.MISS} · STALE=${serverTally.STALE}`;
   }
 
-  return { el, reset, onAttempt, note, cache, serverCache };
+  return { el, reset, onAttempt, note, serverCache };
 }
