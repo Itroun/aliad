@@ -96,11 +96,30 @@ export async function identityClosure(
     fanoutCap = DEFAULT_FANOUT_CAP,
     onNode,
     onBudgetExhausted,
+    onWalkStats,
   } = {},
 ) {
   const ownRootKey = normaliseName(rootName);
   const visited = new Set();
   if (ownRootKey) visited.add(ownRootKey);
+
+  // TEMP DIAGNOSTIC (alias-chain budget sizing, TODO.md "Long alias chains dodge
+  // the fan-out cap"). Per-root tallies to decide between a flat alias cap vs a
+  // barren-hop heuristic. Remove once the budget design is settled.
+  const stats = {
+    root: rootName,
+    lookups: 0, // total budget spent (cold + cached node reads)
+    aliasLookups: 0, // of those, reached via an `aka` hop
+    memberLookups: 0, // of those, reached via a `member` hop
+    aliasProductive: 0, // accepted alias node that added ≥1 new band/project
+    aliasBarren: 0, // accepted alias node that added no new bands
+    aliasAsGroup: 0, // alias node that turned out to be a group (skipped)
+    aliasRejected: 0, // alias node rejected by the foreign-identity guard
+    aliasRegisteredOnly: 0, // band-less alias stub: names registered, not walked
+    maxAliasDepth: 0, // longest consecutive alias-hop chain from the root
+    budgetExhausted: false,
+    skipped: 0,
+  };
 
   const initialMerged = (await neighbors(rootName)) ?? emptyResult();
   let accumulated = initialMerged;
@@ -108,6 +127,7 @@ export async function identityClosure(
   enqueueFromNode(pending, visited, initialMerged, [], rootKeys, fanoutCap, {
     parentKind: null,
     viaHadMemberStep: false,
+    aliasDepth: 0,
   });
   let budget = maxLookups;
   const rejectedAliasKeys = new Set();
@@ -144,6 +164,16 @@ export async function identityClosure(
 
     budget--;
 
+    // TEMP DIAGNOSTIC: classify this lookup by hop kind / chain depth.
+    const isAlias = item.kind === 'alias';
+    stats.lookups++;
+    if (isAlias) {
+      stats.aliasLookups++;
+      if ((item.aliasDepth ?? 0) > stats.maxAliasDepth) stats.maxAliasDepth = item.aliasDepth ?? 0;
+    } else if (item.kind === 'member') {
+      stats.memberLookups++;
+    }
+
     const nodeMerged = (await neighbors(item.name)) ?? emptyResult();
 
     // Suspected alias-of-group: a previous node listed this name as an alias, but
@@ -152,6 +182,7 @@ export async function identityClosure(
     // collaborators leak in as apparent aliases. Mirror lookup.js exactly.
     const looksLikeGroup = (nodeMerged.members ?? []).length > 0;
     if (item.kind === 'alias' && looksLikeGroup) {
+      stats.aliasAsGroup++; // TEMP DIAGNOSTIC
       rejectedAliasKeys.add(key);
       continue;
     }
@@ -173,6 +204,7 @@ export async function identityClosure(
       !item.parentHasBands &&
       !setsIntersect(connKeys, clusterConnections)
     ) {
+      stats.aliasRejected++; // TEMP DIAGNOSTIC
       rejectedAliasKeys.add(key);
       continue;
     }
@@ -184,8 +216,24 @@ export async function identityClosure(
     // the cluster has any bands we still fan, so a band-less root chain can reach
     // its first real identity (A aka B aka C-with-a-band).
     if (item.kind === 'alias' && connKeys.size === 0 && clusterHasProjects) {
+      stats.aliasRegisteredOnly++; // TEMP DIAGNOSTIC
       registerWalkableAliases(visited, nodeMerged);
       continue;
+    }
+
+    // TEMP DIAGNOSTIC: an accepted alias hop is "productive" if it contributes a
+    // band/project the cluster didn't already have, else "barren" (the
+    // spelling-variant case we're trying to size a budget against).
+    if (isAlias) {
+      let addedNew = false;
+      for (const k of connKeys) {
+        if (!clusterConnections.has(k)) {
+          addedNew = true;
+          break;
+        }
+      }
+      if (addedNew) stats.aliasProductive++;
+      else stats.aliasBarren++;
     }
 
     const viaChain = [item.name, ...item.viaChain];
@@ -214,12 +262,18 @@ export async function identityClosure(
     enqueueFromNode(pending, visited, nodeMerged, viaChain, rootKeys, fanoutCap, {
       parentKind: item.kind,
       viaHadMemberStep,
+      aliasDepth: item.aliasDepth ?? 0,
     });
   }
 
   if (budget === 0 && pending.length > 0) {
     onBudgetExhausted?.({ skipped: pending.length });
   }
+
+  // TEMP DIAGNOSTIC: emit the per-root walk tally.
+  stats.budgetExhausted = budget === 0 && pending.length > 0;
+  stats.skipped = pending.length;
+  onWalkStats?.(stats);
 
   if (rejectedAliasKeys.size > 0) {
     accumulated = {
@@ -232,7 +286,7 @@ export async function identityClosure(
 }
 
 function enqueueFromNode(pending, visited, node, viaChain, rootKeys, fanoutCap, ctx = {}) {
-  const { parentKind = null, viaHadMemberStep = false } = ctx;
+  const { parentKind = null, viaHadMemberStep = false, aliasDepth = 0 } = ctx;
   // Whether THIS node has bands of its own — propagated to its hops so the
   // foreign-identity guard can tell a legit "same person, different band" alias
   // (hopped from a band-bearing node) from a poisoned bridge (a band-less alias
@@ -247,7 +301,14 @@ function enqueueFromNode(pending, visited, node, viaChain, rootKeys, fanoutCap, 
     for (const alias of walkableAliases) {
       const key = normaliseName(alias?.name);
       if (!key || visited.has(key)) continue;
-      pending.push({ name: alias.name, viaChain, kind: 'alias', viaHadMemberStep, parentHasBands });
+      pending.push({
+        name: alias.name,
+        viaChain,
+        kind: 'alias',
+        viaHadMemberStep,
+        parentHasBands,
+        aliasDepth: aliasDepth + 1,
+      });
     }
   }
   // Follow members only when the node is itself a group AND we did not arrive via
@@ -263,6 +324,7 @@ function enqueueFromNode(pending, visited, node, viaChain, rootKeys, fanoutCap, 
         kind: 'member',
         viaHadMemberStep: true,
         parentHasBands,
+        aliasDepth: 0,
       });
     }
   }
@@ -274,7 +336,14 @@ function enqueueFromNode(pending, visited, node, viaChain, rootKeys, fanoutCap, 
     for (const entry of bucket ?? []) {
       const key = normaliseName(entry?.name);
       if (!key || visited.has(key) || !rootKeys.has(key)) continue;
-      pending.push({ name: entry.name, viaChain, kind: 'alias', viaHadMemberStep, parentHasBands });
+      pending.push({
+        name: entry.name,
+        viaChain,
+        kind: 'alias',
+        viaHadMemberStep,
+        parentHasBands,
+        aliasDepth: aliasDepth + 1,
+      });
     }
   }
 }

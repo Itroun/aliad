@@ -102,6 +102,8 @@ export async function runClosure(
     rootKeys,
     onNode: (m) => emit('progress', { merged: m }),
     onBudgetExhausted: (info) => emit('budget', info),
+    // TEMP DIAGNOSTIC: alias-chain budget sizing — remove once settled.
+    onWalkStats: (s) => console.log('[ALIAS-WALK]', JSON.stringify(s)),
   });
 
   const queried = PROVIDER_NAMES.filter((p) => rootOutcomes[p] === true);
