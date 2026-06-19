@@ -25,17 +25,30 @@ export function createDevProbe() {
   // One collapsible group per lineup act, so a big run reads as ~N act summaries
   // instead of hundreds of per-node lines (the walk detail stays one click away).
   const actGroups = new Map();
-  let serverCacheRow = null;
   const serverTally = { HIT: 0, MISS: 0, STALE: 0 };
+
+  // Run-wide L2 (D1 quad store) cache roll-up. Created eagerly and pinned as the
+  // first list item so it reads as a header summary, rather than getting buried
+  // under whichever act happened to resolve first (which is where lazy creation
+  // used to drop it).
+  const serverCacheRow = document.createElement('li');
+  serverCacheRow.className = 'dev-probe-item state-info';
+  function renderServerCache() {
+    serverCacheRow.textContent =
+      `server-cache · HIT=${serverTally.HIT}` +
+      ` · MISS=${serverTally.MISS} · STALE=${serverTally.STALE}`;
+  }
+  renderServerCache();
+  list.append(serverCacheRow);
 
   function reset() {
     rows.clear();
     actGroups.clear();
-    serverCacheRow = null;
     serverTally.HIT = 0;
     serverTally.MISS = 0;
     serverTally.STALE = 0;
-    list.replaceChildren();
+    renderServerCache();
+    list.replaceChildren(serverCacheRow);
     el.hidden = true;
   }
 
@@ -47,6 +60,13 @@ export function createDevProbe() {
       li = document.createElement('li');
       rows.set(path, li);
       list.append(li);
+    }
+
+    // Keep the run-wide server-cache summary pinned directly beneath the fetch
+    // attempt rows (just under "direct → ok") rather than above them. With no
+    // fetch row (e.g. pasted text) it stays at the top.
+    if (li.nextSibling !== serverCacheRow) {
+      list.insertBefore(serverCacheRow, li.nextSibling);
     }
 
     li.className = `dev-probe-item state-${state}`;
@@ -113,19 +133,12 @@ export function createDevProbe() {
 
   // Rolling tally of the shared L2 (D1 quad store) cache outcomes. Run a lineup
   // in a second browser to see HITs climb — that proves the cross-visitor cache
-  // works.
+  // works. The row itself is created eagerly above and pinned to the top.
   function serverCache(outcome) {
     if (!outcome || !(outcome in serverTally)) return;
     serverTally[outcome]++;
     el.hidden = false;
-    if (!serverCacheRow) {
-      serverCacheRow = document.createElement('li');
-      serverCacheRow.className = 'dev-probe-item state-info';
-      list.append(serverCacheRow);
-    }
-    serverCacheRow.textContent =
-      `server-cache · HIT=${serverTally.HIT}` +
-      ` · MISS=${serverTally.MISS} · STALE=${serverTally.STALE}`;
+    renderServerCache();
   }
 
   return { el, reset, onAttempt, note, providerResult, serverCache };
