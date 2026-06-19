@@ -66,8 +66,18 @@ function collectRelations(entry) {
     }
   }
 
+  // Attribute each relation to the specific *part* that hosts it, so a collab
+  // ("X vs Y") renders "member of Y" rather than "member of X vs Y". The combo
+  // source itself is excluded from ownership: it represents the whole act, and
+  // counting it would tie every relation back to the combo name (the bug this
+  // avoids). When exactly one part hosts the relation we pin to it; otherwise
+  // (shared by multiple parts, or hosted only by the combo lookup) we keep the
+  // combo name. Solo acts have only the combo source, so they pin to their own
+  // name as before.
+  const comboKey = normaliseName(entry?.name);
+  const partSources = sources.filter((s) => normaliseName(s.name) !== comboKey);
   for (const [key, rel] of rels) {
-    const owners = sources.filter((s) => sourceHasKey(s.merged, key));
+    const owners = partSources.filter((s) => sourceHasKey(s.merged, key));
     rel.subName = owners.length === 1 ? owners[0].name : entry?.name;
   }
   return rels;

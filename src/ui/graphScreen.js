@@ -55,7 +55,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
   panelHost.append(focusPanel.el);
 
   // ── State ──────────────────────────────────────────────────────────
-  const completedResults = []; // [{ name, merged, closure }]
+  const completedResults = []; // [{ name, merged, closure, sources, parts }]
   const completedNames = new Set(); // lineup names that finished lookup
   let prevGraph = { clusters: [], singletons: [] };
   let currentGraph = { clusters: [], singletons: [] };
@@ -158,7 +158,13 @@ export function createGraphScreen({ lineup, onViewChange }) {
     if (finalized) return;
     if (completedNames.has(name)) return;
     completedNames.add(name);
-    completedResults.push({ name, merged, closure: summary.closure ?? new Set() });
+    completedResults.push({
+      name,
+      merged,
+      closure: summary.closure ?? new Set(),
+      sources: summary.sources,
+      parts: summary.parts,
+    });
 
     prevGraph = currentGraph;
     currentGraph = buildGraph(completedResults);

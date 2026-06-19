@@ -65,6 +65,11 @@ export function lookupAll(names, callbacks = {}) {
         queried: combo.queried ?? [],
         errored: combo.errored ?? [],
         closure,
+        // Carry per-part attribution through to the graph builder so collab
+        // ("X vs Y") edges can pin relations to the specific part that hosts
+        // them rather than the combo name.
+        sources,
+        parts: parts ?? [],
       });
       return { name, merged, closure, sources, parts: parts ?? [] };
     }),

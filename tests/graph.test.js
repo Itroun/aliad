@@ -309,4 +309,41 @@ describe('buildGraph', () => {
     const { singletons } = buildGraph(per);
     expect(singletons).toEqual(['Real']);
   });
+
+  it('attributes a collab bridge to the specific part, not the "X vs Y" combo', () => {
+    // "Drop & Dash vs Germinator" ↔ "Psyko Disko vs Spies", bridged by Steve
+    // Lavell, who is a member only of Germinator and of Psyko Disko. The combo
+    // lookup itself also surfaces him (the case that used to force the fallback
+    // to the combo name); attribution must still pin to the hosting part.
+    const mergedOf = (members) => ({
+      aliases: [],
+      members: members.map((n) => ({ name: n })),
+      groups: [],
+      relatedProjects: [],
+    });
+    const collab = (name, parts, hostPart) => ({
+      name,
+      merged: mergedOf(['Steve Lavell']),
+      closure: new Set([normaliseName(name), ...parts.map(normaliseName), 'steve lavell']),
+      parts,
+      sources: [
+        { name, merged: mergedOf(['Steve Lavell']) }, // combo lookup also has him
+        ...parts.map((p) => ({
+          name: p,
+          merged: mergedOf(p === hostPart ? ['Steve Lavell'] : []),
+        })),
+      ],
+    });
+    const per = [
+      collab('Drop & Dash vs Germinator', ['Drop & Dash', 'Germinator'], 'Germinator'),
+      collab('Psyko Disko vs Spies', ['Psyko Disko', 'Spies'], 'Psyko Disko'),
+    ];
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges[0];
+    const lavell = edge.evidence.find((e) => e.person === 'Steve Lavell');
+    expect(lavell.hops).toEqual([
+      { rel: 'member of', with: 'Germinator' },
+      { rel: 'member of', with: 'Psyko Disko' },
+    ]);
+  });
 });
