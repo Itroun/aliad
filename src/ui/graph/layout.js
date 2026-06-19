@@ -157,11 +157,16 @@ export function createLayout({ width, height, padding = 80 }) {
       clusterInfos.push({
         id: `c${ci}`,
         names,
-        r: boundingRadius(nodeList, 24),
+        // Pad the bounding circle beyond the outermost dot to leave room for the
+        // horizontal label text (rendered ~12px + name width to the side of each
+        // dot), which isn't otherwise in the collision model.
+        r: boundingRadius(nodeList, 40),
       });
     }
 
-    const packed = packClusters(clusterInfos, width, height, 48);
+    // Extra inter-cluster gap so neighbouring clusters' labels (which extend
+    // horizontally well past the dots) don't overrun into each other.
+    const packed = packClusters(clusterInfos, width, height, 96);
 
     // Convert to absolute positions and clamp inside canvas.
     const out = new Map();
