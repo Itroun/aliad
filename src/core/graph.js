@@ -113,7 +113,7 @@ function unionFind(n) {
   return { find, union };
 }
 
-function buildEdge(A, B) {
+function buildEdge(A, B, clusterNodeKeys = new Set()) {
   const aKey = normaliseName(A.name);
   const bKey = normaliseName(B.name);
   const aRels = collectRelations(A);
@@ -125,6 +125,14 @@ function buildEdge(A, B) {
   const aPartKeys = new Set((A.parts ?? []).map(normaliseName).filter(Boolean));
   const bPartKeys = new Set((B.parts ?? []).map(normaliseName).filter(Boolean));
   const isPartKey = (key) => aPartKeys.has(key) || bPartKeys.has(key);
+
+  // A bridge that is itself *another lineup node in this cluster* is the same
+  // circular noise, one level up: that node is already a point with its own
+  // edges to both A and B, so a direct A–B edge through it just restates a path
+  // the graph already shows (the triangle reduces to a star through the hub).
+  // Scoped to lineup nodes only — a shared *non-lineup* bridge (e.g. a band that
+  // isn't on the lineup) has no point of its own, so its edge must stay.
+  const isOtherNode = (key) => key !== aKey && key !== bKey && clusterNodeKeys.has(key);
 
   const evidence = [];
   const suppressed = [];
@@ -142,7 +150,7 @@ function buildEdge(A, B) {
   // already covered by the person-bridge row, just expressed honestly.
   let hasPersonBridge = false;
   for (const [key, aEntry] of aRels) {
-    if (key === aKey || key === bKey || isPartKey(key)) continue;
+    if (key === aKey || key === bKey || isPartKey(key) || isOtherNode(key)) continue;
     const bEntry = bRels.get(key);
     if (!bEntry) continue;
     if (PERSON_BUCKETS.has(aEntry.bucket) && PERSON_BUCKETS.has(bEntry.bucket)) {
@@ -186,6 +194,10 @@ function buildEdge(A, B) {
   // Bridge identities present in both A and B's merged buckets.
   for (const [key, aEntry] of aRels) {
     if (key === aKey || key === bKey) continue;
+    // Bridge is itself another lineup node: drop the row outright (not held as a
+    // fallback like a combo part), since that node's own edges already connect
+    // A and B — the cluster stays joined without this restating edge.
+    if (isOtherNode(key)) continue;
     const bEntry = bRels.get(key);
     if (!bEntry) continue;
     if ((aEntry.viaKey || bEntry.viaKey) && hasPersonBridge) continue;
@@ -269,10 +281,11 @@ export function buildGraph(perArtistResults) {
       continue;
     }
     const nodes = indices.map((i) => entries[i].name);
+    const clusterNodeKeys = new Set(nodes.map(normaliseName));
     const edges = [];
     for (let i = 0; i < indices.length; i++) {
       for (let j = i + 1; j < indices.length; j++) {
-        const edge = buildEdge(entries[indices[i]], entries[indices[j]]);
+        const edge = buildEdge(entries[indices[i]], entries[indices[j]], clusterNodeKeys);
         if (edge) edges.push(edge);
       }
     }

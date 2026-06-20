@@ -384,4 +384,40 @@ describe('buildGraph', () => {
       { rel: 'member of', with: 'Ultravibe' },
     ]);
   });
+
+  it('reduces a triangle to a star when the bridge is itself a lineup node', () => {
+    // Moon Beasts (a lineup band) has two members who are also lineup acts under
+    // their own names (Ephedra/Alexandre Cohen, Proxeeus/Jerome Lesterps). The
+    // Moon Beasts↔Ephedra and Moon Beasts↔Proxeeus person-bridge edges fully
+    // explain the cluster; a direct Ephedra↔Proxeeus edge bridged solely by
+    // Moon Beasts (a visible node) just restates the hub and must be dropped.
+    const moonBeasts = entry('Moon Beasts', {
+      members: ['Ephedra', 'Proxeeus', 'Alexandre Cohen', 'Jerome Lesterps'],
+    });
+    const ephedra = entry('Ephedra', { groups: ['Moon Beasts'], aliases: ['Alexandre Cohen'] });
+    const proxeeus = entry('Proxeeus', { groups: ['Moon Beasts'], aliases: ['Jerome Lesterps'] });
+    const { clusters } = buildGraph([moonBeasts, ephedra, proxeeus]);
+    expect(clusters).toHaveLength(1);
+
+    const hasEdge = (x, y) =>
+      clusters[0].edges.some((e) => (e.a === x && e.b === y) || (e.a === y && e.b === x));
+    expect(hasEdge('Moon Beasts', 'Ephedra')).toBe(true);
+    expect(hasEdge('Moon Beasts', 'Proxeeus')).toBe(true);
+    // The redundant hub-restating edge is gone.
+    expect(hasEdge('Ephedra', 'Proxeeus')).toBe(false);
+    expect(clusters[0].edges).toHaveLength(2);
+  });
+
+  it('keeps a shared-band edge when the band is NOT a lineup node', () => {
+    // Same shape, but the shared band isn't on the lineup — so it has no point of
+    // its own and the only way to show the two acts are bandmates is the edge
+    // between them. It must survive.
+    const ephedra = entry('Ephedra', { groups: ['Moon Beasts'] });
+    const proxeeus = entry('Proxeeus', { groups: ['Moon Beasts'] });
+    const { clusters } = buildGraph([ephedra, proxeeus]);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0].edges).toHaveLength(1);
+    const bridge = clusters[0].edges[0].evidence.find((e) => e.person === 'Moon Beasts');
+    expect(bridge).toBeTruthy();
+  });
 });
