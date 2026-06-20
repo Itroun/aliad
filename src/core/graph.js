@@ -32,19 +32,23 @@ function relForEntry(bucket, entry) {
 
 const REL_BUCKETS = ['aliases', 'members', 'groups', 'relatedProjects'];
 
-function sourceHasKey(merged, key) {
+// How a specific source (part of a combo, or a solo act) relates to `key`, or
+// null if that source doesn't host it. Returns the relation rather than a bare
+// boolean so a person who belongs to multiple parts under *different* relations
+// (member of one, aka of another) labels each hop correctly.
+function sourceRelFor(merged, key) {
   for (const bucket of REL_BUCKETS) {
     for (const entry of merged?.[bucket] ?? []) {
-      if (normaliseName(entry?.name) === key) return true;
+      if (normaliseName(entry?.name) === key) return relForEntry(bucket, entry);
     }
   }
-  return false;
+  return null;
 }
 
 // Build the relation map for a lineup entry. For collab combos ("X vs Y") the
 // merged data fuses both halves; `sources` lets us pin each relation to the
-// specific sub-name that actually hosts it. `subName` falls back to the combo
-// name when a relation is genuinely shared by more than one part.
+// specific part(s) that actually host it via `rel.owners` ([{ name, rel }]),
+// which falls back to the combo name only when no part hosts the relation.
 function collectRelations(entry) {
   const merged = entry?.merged;
   const sources = entry?.sources?.length > 0 ? entry.sources : [{ name: entry?.name, merged }];
@@ -66,19 +70,26 @@ function collectRelations(entry) {
     }
   }
 
-  // Attribute each relation to the specific *part* that hosts it, so a collab
+  // Attribute each relation to the specific *part(s)* that host it, so a collab
   // ("X vs Y") renders "member of Y" rather than "member of X vs Y". The combo
   // source itself is excluded from ownership: it represents the whole act, and
   // counting it would tie every relation back to the combo name (the bug this
-  // avoids). When exactly one part hosts the relation we pin to it; otherwise
-  // (shared by multiple parts, or hosted only by the combo lookup) we keep the
-  // combo name. Solo acts have only the combo source, so they pin to their own
-  // name as before.
+  // avoids). Each owning part becomes its own hop — a person who belongs to
+  // several parts (e.g. Bill Halsey, member of both Cosmosis and Laughing Buddha)
+  // renders "member of Cosmosis · member of Laughing Buddha", not the combo name.
+  // When *no* part hosts the relation (surfaced only by the combo's own lookup)
+  // we keep the combo name, since we genuinely can't pin it to a part. Solo acts
+  // have only the combo source, so `partSources` is empty and they fall back to
+  // their own name as before.
   const comboKey = normaliseName(entry?.name);
   const partSources = sources.filter((s) => normaliseName(s.name) !== comboKey);
   for (const [key, rel] of rels) {
-    const owners = partSources.filter((s) => sourceHasKey(s.merged, key));
-    rel.subName = owners.length === 1 ? owners[0].name : entry?.name;
+    const owners = [];
+    for (const s of partSources) {
+      const r = sourceRelFor(s.merged, key);
+      if (r) owners.push({ name: s.name, rel: r });
+    }
+    rel.owners = owners.length > 0 ? owners : [{ name: entry?.name, rel: rel.rel }];
   }
   return rels;
 }
@@ -143,6 +154,13 @@ function buildEdge(A, B) {
   const groupBucketRel = (entry) =>
     entry.bucket === 'relatedProjects' ? 'related to' : 'member of';
 
+  // One hop per owning part — a person who belongs to several parts of a combo
+  // contributes a hop for each ("member of Cosmosis · member of Laughing Buddha").
+  // `owners` is always populated by collectRelations (falling back to the combo
+  // name); `root` is a defensive fallback for entries built without it.
+  const ownerHops = (entry, root) =>
+    (entry.owners ?? [{ name: root, rel: entry.rel }]).map((o) => ({ rel: o.rel, with: o.name }));
+
   // Direct relationship: B appears in A's merged (or vice-versa).
   // For via-mediated entries (e.g. B reached through some member/alias X), we
   // emit the actual chain through X rather than a misleading single-hop row.
@@ -153,13 +171,11 @@ function buildEdge(A, B) {
     if (entry.viaKey && ownRels.has(entry.viaKey)) {
       const via = ownRels.get(entry.viaKey);
       pushEvidence(entry.viaKey, via.displayName || entry.viaName, [
-        { rel: via.rel, with: via.subName ?? root },
+        ...ownerHops(via, root),
         { rel: groupBucketRel(entry), with: otherName },
       ]);
     } else {
-      pushEvidence(otherKey, entry.displayName || otherName, [
-        { rel: entry.rel, with: entry.subName ?? root },
-      ]);
+      pushEvidence(otherKey, entry.displayName || otherName, ownerHops(entry, root));
     }
   };
   if (!hasPersonBridge) {
@@ -180,10 +196,7 @@ function buildEdge(A, B) {
     const row = {
       key,
       person: aEntry.displayName || bEntry.displayName,
-      hops: [
-        { rel: aEntry.rel, with: aEntry.subName ?? A.name },
-        { rel: bEntry.rel, with: bEntry.subName ?? B.name },
-      ],
+      hops: [...ownerHops(aEntry, A.name), ...ownerHops(bEntry, B.name)],
     };
     // A bridge that is itself a combo part is circular — hold it back as a
     // fallback so the edge survives if it had no other evidence.

@@ -346,4 +346,42 @@ describe('buildGraph', () => {
       { rel: 'member of', with: 'Psyko Disko' },
     ]);
   });
+
+  it('splits a collab bridge into one hop per part when a person hosts both', () => {
+    // "Cosmosis vs Laughing Buddha" ↔ "Ultravibe", bridged by Bill Halsey, who is
+    // a member of *both* combo parts and of Ultravibe. The combo side must emit a
+    // hop per hosting part ("member of Cosmosis · member of Laughing Buddha")
+    // rather than collapsing to the combo name.
+    const mergedOf = (members) => ({
+      aliases: [],
+      members: members.map((n) => ({ name: n })),
+      groups: [],
+      relatedProjects: [],
+    });
+    const combo = {
+      name: 'Cosmosis vs Laughing Buddha',
+      merged: mergedOf(['Bill Halsey']),
+      closure: new Set([
+        normaliseName('Cosmosis vs Laughing Buddha'),
+        'cosmosis',
+        'laughing buddha',
+        'bill halsey',
+      ]),
+      parts: ['Cosmosis', 'Laughing Buddha'],
+      sources: [
+        { name: 'Cosmosis vs Laughing Buddha', merged: mergedOf(['Bill Halsey']) },
+        { name: 'Cosmosis', merged: mergedOf(['Bill Halsey']) },
+        { name: 'Laughing Buddha', merged: mergedOf(['Bill Halsey']) },
+      ],
+    };
+    const ultravibe = entry('Ultravibe', { members: ['Bill Halsey'] });
+    const { clusters } = buildGraph([combo, ultravibe]);
+    const edge = clusters[0].edges[0];
+    const halsey = edge.evidence.find((e) => e.person === 'Bill Halsey');
+    expect(halsey.hops).toEqual([
+      { rel: 'member of', with: 'Cosmosis' },
+      { rel: 'member of', with: 'Laughing Buddha' },
+      { rel: 'member of', with: 'Ultravibe' },
+    ]);
+  });
 });
