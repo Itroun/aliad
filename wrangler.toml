@@ -8,6 +8,14 @@ compatibility_date = "2025-01-01"
 directory = "./dist"
 binding = "ASSETS"
 
+# Origin/Referer allowlist for the /api/* proxies (server/_lib/originCheck.js).
+# Comma-separated list of allowed origins, e.g. the prod domain plus the
+# *.pages.dev preview. Unset → the check degrades open (fine for local
+# `wrangler dev`); MUST be set before/at deploy or the paid proxies are open to
+# any site's browser JS. Set it as a deploy-time var, not committed here:
+#   npx wrangler deploy --var ALLOWED_ORIGIN:https://your-domain,https://aka.pages.dev
+# (or add it under [vars] / the dashboard once the domain is known).
+
 # KV namespace for rate limiting and the Anthropic daily request ceiling.
 # Local dev uses a filesystem-backed KV so the `id` here is a placeholder.
 # Before deploying, run `npx wrangler kv namespace create aka-kv` and replace

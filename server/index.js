@@ -14,6 +14,7 @@ import { handle as lookup } from './api/lookup.js';
 import { handle as closure } from './api/closure.js';
 import { handle as anthropic } from './api/anthropic.js';
 import { handle as fetchPage } from './api/fetch-page.js';
+import { checkOrigin } from './_lib/originCheck.js';
 
 // The DO class must be exported from the Worker module so the runtime can
 // instantiate it for the RATE_LIMITER binding.
@@ -31,6 +32,11 @@ export default {
     const { pathname } = new URL(request.url);
     const handler = ROUTES[pathname];
     if (handler) {
+      // Origin/Referer allowlist guards every /api/* route from one chokepoint —
+      // these are our paid proxies and all serve our own same-origin frontend.
+      if (!checkOrigin(request, env).allowed) {
+        return new Response('Forbidden origin', { status: 403 });
+      }
       const context = { request, env, waitUntil: (p) => ctx.waitUntil(p) };
       return handler(context);
     }
