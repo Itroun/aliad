@@ -142,6 +142,25 @@ export function createGraphScreen({ lineup, onViewChange }) {
   renderSingletons();
   updateProgress();
 
+  // Throttle relayouts: many streamed completions collapse into at most one
+  // layout pass every RELAYOUT_INTERVAL_MS, so the graph's target positions
+  // change a few times a second rather than every frame. Combined with the
+  // renderer's gentle easing, this keeps the motion calm — nodes settle between
+  // bursts instead of continuously re-aiming. A trailing call guarantees the
+  // final state still renders.
+  const RELAYOUT_INTERVAL_MS = 1500;
+  let relayoutTimer = null;
+  let lastRelayout = 0;
+  function scheduleRelayout() {
+    if (relayoutTimer != null) return;
+    const wait = Math.max(0, RELAYOUT_INTERVAL_MS - (performance.now() - lastRelayout));
+    relayoutTimer = setTimeout(() => {
+      relayoutTimer = null;
+      lastRelayout = performance.now();
+      recomputeLayoutAndRender();
+    }, wait);
+  }
+
   // Re-layout on resize (debounced via rAF).
   let resizeScheduled = false;
   window.addEventListener('resize', () => {
@@ -175,7 +194,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
     }
 
     updateProgress();
-    recomputeLayoutAndRender();
+    scheduleRelayout();
   }
 
   function onArtistDone() {

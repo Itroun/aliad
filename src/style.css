@@ -850,6 +850,42 @@ body > #app {
   animation: aka-fadein 0.4s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
+/* New node entrance: fade the label/node in and pop the dot. `--enter-delay`
+   (set per node in render.js) staggers a batch so additions cascade. `both`
+   keeps the node invisible through its delay, then settles at the end state. */
+@keyframes node-enter-fade {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes node-dot-pop {
+  0% {
+    transform: scale(0.3);
+  }
+  60% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.node-enter {
+  animation: node-enter-fade 0.4s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation-delay: var(--enter-delay, 0s);
+}
+
+.node-enter .node-dot {
+  animation: node-dot-pop 0.45s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation-delay: var(--enter-delay, 0s);
+}
+
 /* ── Dev probe (dev mode only) ───────────────────────────────────── */
 
 .dev-probe {
