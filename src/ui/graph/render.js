@@ -95,6 +95,19 @@ export function createGraphPane() {
       }
     }
 
+    // Edge-aware label side: sum the horizontal direction of each node's edges,
+    // then place its label on the OPPOSITE side so it sits in the emptier space
+    // and doesn't lie across its own connection lines. Nodes with no edges fall
+    // back to "toward canvas centre".
+    const edgeDirX = new Map(); // name → Σ(neighbour.x − node.x)
+    for (const edge of edges) {
+      const pa = positions.get(edge.a);
+      const pb = positions.get(edge.b);
+      if (!pa || !pb) continue;
+      edgeDirX.set(edge.a, (edgeDirX.get(edge.a) ?? 0) + (pb.x - pa.x));
+      edgeDirX.set(edge.b, (edgeDirX.get(edge.b) ?? 0) + (pa.x - pb.x));
+    }
+
     // ── Nodes ─────────────────────────────────────────────────────────
     const seenNodes = new Set();
     for (const name of nodes) {
@@ -113,8 +126,15 @@ export function createGraphPane() {
       el.style.top = `${pos.y}px`;
       const label = el.querySelector('.node-label');
       label.textContent = name;
-      // Label alignment: right of dot when on the left half, else left.
-      el.classList.toggle('align-left', pos.x > width * 0.55);
+
+      // `align-left` puts the label to the LEFT of the dot.
+      const dir = edgeDirX.get(name);
+      let alignLeft = dir ? dir > 0 : pos.x > width * 0.55;
+      // Keep the label on-canvas: flip if it would run off the near edge.
+      const labelW = 12 + name.length * 7.2;
+      if (alignLeft && pos.x - labelW < 4) alignLeft = false;
+      else if (!alignLeft && pos.x + labelW > width - 4) alignLeft = true;
+      el.classList.toggle('align-left', alignLeft);
     }
     for (const [name, el] of nodeEls) {
       if (!seenNodes.has(name)) {

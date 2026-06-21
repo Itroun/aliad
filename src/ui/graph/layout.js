@@ -54,13 +54,21 @@ function stepCluster(nodes, edges, cfg) {
   }
 }
 
-function boundingRadius(nodes, nodePadding) {
-  let max = 0;
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+// Cluster bounding radius from the dots alone (plus a small pad). Labels are
+// deliberately NOT folded in here: doing so over-inflated long-named clusters
+// and flung them to the canvas edges. Label spacing is handled by the uniform
+// inter-cluster gap + edge-aware label placement in the renderer instead.
+function boundingRadius(nodes, pad) {
+  let maxDist = 0;
   for (const n of nodes) {
     const r = Math.hypot(n.x, n.y);
-    if (r > max) max = r;
+    if (r > maxDist) maxDist = r;
   }
-  return max + nodePadding;
+  return maxDist + pad;
 }
 
 // Greedy circle packing: place the largest cluster at the canvas centre, then
@@ -123,10 +131,18 @@ export function createLayout({ width, height, padding = 80 }) {
 
   function compute({ clusters = [] }, iterations = 200) {
     const cfg = {
-      kRep: 12000,
-      kSpring: 0.04,
-      restLen: 140,
-      kCenter: 0.02,
+      // Repulsion is raised (vs the original 12000) and centering lowered (vs
+      // 0.02) so an appendage — a "leg" of nodes off one triangle vertex — is
+      // pushed OUTWARD rather than folded back over the body by the centering
+      // pull. But not too far: an earlier pass (kRep 20000 / kCenter 0.006) left
+      // small clusters very flat/spread, so these are dialled back to a middle
+      // ground. kCenter stays small-but-nonzero because some edges are suppressed
+      // (triangle reduction, redundant bridges), making it the only force keeping
+      // an edge-less node cohesive with its cluster.
+      kRep: 13000,
+      kSpring: 0.045,
+      restLen: 138,
+      kCenter: 0.013,
       damping: 0.82,
     };
 
@@ -157,30 +173,37 @@ export function createLayout({ width, height, padding = 80 }) {
       clusterInfos.push({
         id: `c${ci}`,
         names,
-        // Pad the bounding circle beyond the outermost dot to leave room for the
-        // horizontal label text (rendered ~12px + name width to the side of each
-        // dot), which isn't otherwise in the collision model.
-        r: boundingRadius(nodeList, 40),
+        r: boundingRadius(nodeList, 44),
       });
     }
 
-    // Extra inter-cluster gap so neighbouring clusters' labels (which extend
-    // horizontally well past the dots) don't overrun into each other.
-    const packed = packClusters(clusterInfos, width, height, 96);
+    // Uniform breathing gap between clusters — gives labels some room without the
+    // per-cluster radius inflation that pushed clusters to the canvas edges.
+    const packed = packClusters(clusterInfos, width, height, 72);
 
-    // Convert to absolute positions and clamp inside canvas.
+    // Convert to absolute positions. Clamp the whole cluster by its CENTRE (so it
+    // stays on-canvas) rather than clamping each node — per-node clamping pinned
+    // both nodes of an edge cluster to the same margin coordinate, flattening it
+    // into a straight horizontal/vertical line. Centre-clamping preserves the
+    // cluster's shape and angle. The min/max guards keep the range valid when a
+    // cluster is larger than the canvas (falls back to the canvas centre).
     const out = new Map();
     for (const info of clusterInfos) {
       const centre = packed.get(info.id);
+      const r = info.r;
+      const cx = clamp(
+        centre.x,
+        Math.min(r + padding, width / 2),
+        Math.max(width - r - padding, width / 2),
+      );
+      const cy = clamp(
+        centre.y,
+        Math.min(r + padding, height / 2),
+        Math.max(height - r - padding, height / 2),
+      );
       for (const name of info.names) {
         const p = localPositions.get(name);
-        let x = centre.x + p.x;
-        let y = centre.y + p.y;
-        if (x < padding) x = padding;
-        if (y < padding) y = padding;
-        if (x > width - padding) x = width - padding;
-        if (y > height - padding) y = height - padding;
-        out.set(name, { x, y });
+        out.set(name, { x: cx + p.x, y: cy + p.y });
       }
     }
     return out;
