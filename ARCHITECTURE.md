@@ -1,301 +1,186 @@
-# Architecture: what we have, and where it should grow
+# Architecture
 
-This is a snapshot of the current architecture, what's working well and worth preserving, and the two specific places where the design wants to grow: **a persistent cache** and **a graph data model**. It is not a plan — it's the shared mental model the plan should be built on.
+A snapshot of how **aka** is built today, after the cache + graph rewrite. For the
+product pitch and quick-start, see [README.md](./README.md). For _how it got
+here_ — the staged migration from a browser-side recursive walk to a server-side
+graph query — see git history; this file describes the destination, not the
+journey.
 
-## What we have today
+## Data flow
+
+```
+Input ─▶ Extraction ─▶ Closure walk (server) ─▶ Graph view
+ │          │                │                      │
+ paste/     Claude via       /api/closure SSE,      identity graph +
+ URL/file   /api/anthropic   one stream per act     connections panel
+            (messy input     (+ per collab part)
+            only)
+```
+
+1. **Input** (`src/ui/inputScreen.js`). Paste text, a URL, or a flyer/PDF/image.
+2. **Extraction** (`src/core/extract.js`). Clean line-per-artist text passes
+   through untouched; anything messier is sent to Claude through the
+   `/api/anthropic` proxy, which returns a clean list + any alias hints. URLs are
+   fetched server-side via `/api/fetch-page` (SSRF-guarded), HTML pre-cleaned by
+   `src/core/cleanHTML.js`.
+3. **Lookup + closure** (`src/core/lookup.js` → `/api/closure`). `lookupAll` is a
+   thin **SSE client**: it splits collab names ("X vs Y") client-side and opens one
+   `/api/closure` stream per act (and per part + combo), translating the streamed
+   `provider` / `progress` / `budget` / `done` events back into the progressive
+   callbacks the UI already consumes. The actual identity-graph walk runs on the
+   server (see below).
+4. **Display** (`src/ui/graphScreen.js`, `src/ui/graph/*`). Results stream into a
+   live identity graph; a Lineup/Connections toggle (`viewTabs.js`) switches views.
+   `devProbe.js` surfaces per-act cache/error tallies in dev builds.
+
+## Layout
 
 ```
 src/
-├── providers/         lookup(name) → { aliases, groups, members, relatedProjects }
-│   ├── musicbrainz.js
-│   ├── discogs.js
-│   └── provider.js    emptyResult() shape
 ├── core/
-│   ├── lookup.js      orchestrator: per-provider queues, collab split, BFS expansion
-│   ├── merge.js       name normalisation + bucket-wise dedupe with source attribution
-│   ├── rateLimit.js   createQueue({ minIntervalMs })
-│   ├── fetchJson.js
-│   ├── fetchWithRetry.js
-│   ├── extract.js     Anthropic-backed lineup extraction
-│   ├── cleanHTML.js
-│   ├── graph.js       merged-result → graph view-model
-│   └── models.js
-├── ui/                plain DOM, no framework
-│   ├── inputScreen.js
-│   ├── results.js
-│   ├── graph/         graph view
-│   ├── graphScreen.js
-│   ├── emptyGraphScreen.js
-│   ├── viewTabs.js
-│   └── devProbe.js
-├── main.js            wires everything together
+│   ├── lookup.js        SSE client: collab split + per-act /api/closure streams
+│   ├── closure.js       identity-closure query (the walk) — runs server-side
+│   ├── quads.js         pure: mapped result ⇄ typed quads (decompose/reconstitute)
+│   ├── merge.js         normaliseName + bucket-wise, source-attributed dedupe
+│   ├── graph.js         merged closure → graph view-model (edges, bridges, owners)
+│   ├── extract.js       input-type detection + Claude-backed lineup extraction
+│   ├── cleanHTML.js     strip pages down before sending to Claude
+│   ├── fetchWithRetry.js  shared retry (honours Retry-After, capped 60s)
+│   ├── tokenBucket.js   pure bucket math for the Discogs rate gate
+│   ├── schemaVersion.js cache SCHEMA_VERSION (shared L2 invalidation key)
+│   └── models.js        allowed Claude model ids
+├── providers/
+│   ├── musicbrainz.map.js  pure search→pick→map mappers (pickMatch / mapDetails)
+│   ├── discogs.map.js      "
+│   └── provider.js         emptyResult() shape
+├── ui/                  plain DOM, no framework (graph/, screens, viewTabs, devProbe)
+├── main.js              wires screens + lookupAll together
 └── style.css
 
-functions/api/
-├── lookup.js             Pages Function: search+pick+details+map + shared D1 quad cache (L2)
-└── extract/…             Anthropic proxy for lineup extraction
+server/                  Cloudflare Workers app (not Pages)
+├── index.js             fetch() entry: router + ALLOWED_ORIGIN guard → /api/* handlers
+├── api/
+│   ├── lookup.js        search+pick+details+map; reads/writes the D1 quad cache
+│   ├── closure.js       drives the walk per node, streams progress as SSE
+│   ├── anthropic.js     Claude proxy (key injection, rate + daily-ceiling caps)
+│   └── fetch-page.js    URL fetch proxy (SSRF guard, challenge sniffing)
+├── rateLimiter.js       RateLimiter Durable Object (global Discogs token bucket)
+└── _lib/                binding adapters: quadStore (D1), kvLimit (KV),
+                         rateGate (DO), originCheck (origin allowlist)
 
-functions/_lib/
-├── kvLimit.js            per-IP rate limit + Anthropic daily ceiling (KV)
-└── quadStore.js          D1 adapter: lookups + quads tables (the only raw SQL)
-
-src/core/quads.js         pure: mapped result ⇄ typed quads (decompose / reconstitute)
-src/core/closure.js       pure: identity-closure query over the graph (Phase 3a, dormant)
-migrations/0001_create_graph.sql   D1 schema
+migrations/0001_create_graph.sql   D1 schema (lookups + quads + indexes)
 ```
 
-## What works well together
-
-These are the load-bearing pieces. They compose cleanly and shouldn't be disturbed by either of the proposed additions.
-
-### 1. The provider contract
-
-Each provider exports exactly:
-
-```js
-{
-  name,
-  minIntervalMs,
-  lookup(name, { signal, fetchFn? }) → Promise<{ aliases, groups, members, relatedProjects }>
-}
-```
-
-Why it works:
-
-- **Uniform shape.** The orchestrator never branches on provider identity; it just collects results and hands them to `mergeResults`.
-- **`fetchFn` injection.** Tests inject fakes without monkey-patching globals. Real captures live under `tests/fixtures/`.
-- **Adding a source is local.** A Wikidata or ListenBrainz provider is a new file, a one-line registration, and nothing else changes.
-- **The natural cache seam.** Wrapping `lookup` with a cache layer is the cleanest interception point in the whole codebase.
-
-### 2. Merge layer (`src/core/merge.js`)
-
-Tiny and pure:
-
-- `normaliseName` — lowercase, NFKD-strip diacritics, collapse non-letter/digit runs. This is the canonical key used everywhere.
-- `mergeResults` — bucket-wise dedupe by normalised name, preserving `sourceUrl`s as an aggregated `sources: []` per entry.
-- `dedupeNames` — input-side dedupe for lineup rows.
-
-It's associative enough that cached results and live results can be folded together with no special-casing.
-
-### 3. Per-provider rate-limit queues + per-run dedupe cache
-
-In `lookup.js`:
-
-```js
-const queue = createQueue({ minIntervalMs: provider.minIntervalMs });
-const cache = new Map();
-const cachedLookup = (name, opts) => {
-  const key = normaliseName(name);
-  if (cache.has(key)) return { promise: cache.get(key), cached: true };
-  const promise = queue.run(() => provider.lookup(name, opts));
-  cache.set(key, promise);
-  return { promise, cached: false };
-};
-```
-
-- Queues are **per-provider, shared across all artists in one run** — MB and Discogs respect their own limits without blocking each other.
-- The `Map` is a **session-scoped lookup cache.** Two artists in the same lineup that reach the same node (alias, member) only hit the network once.
-- The `cached` flag is already plumbed through `onProviderResult`, so the UI can distinguish fresh vs. cached at the callback layer.
-
-**This is the shape a persistent cache should slot into** — same interface, wider scope.
-
-### 4. The expansion walker (`expandIdentityGraph`)
-
-BFS over the alias / member graph, with rules learned the hard way:
-
-- **Budget cap** (`MAX_EXPANSION_LOOKUPS = 25`) — bounds worst-case fan-out.
-- **Alias fan-out cap** (`ALIAS_FANOUT_CAP = 15`) — prolific artists register names in the closure for clustering but don't burn budget walking each pseudonym.
-- **`visited` set** — cycle protection, keyed on normalised names.
-- **Don't walk members of an alias-reached node** — otherwise collaborators leak in as apparent aliases of the root. Encoded as `parentKind !== 'alias'`.
-- **Alias-with-members is a group, not an identity** — `looksLikeGroup` check rejects the alias attribution and strips it from `accumulated.aliases` so downstream graph-building doesn't bridge the root through a duo-project to the other member's bands.
-- **Skip walking into another lineup root** — register in `visited` so the cluster-union step still merges the two roots, but don't re-fetch.
-- **`via` / `viaChain` / `viaHadMemberStep`** attribution threaded through every accumulated entry — the graph view uses this to render "aka Filteria" rather than "aka X vs Filteria".
-
-**These rules are the crown jewels.** A ground-up rewrite would re-learn them slowly. Whatever data model replaces the recursive loop, the rules need to survive.
-
-### 5. Collab splitting
-
-`splitCollab(name)` handles `X vs Y`, `X b2b Y`, `X & Y`. The orchestrator runs the full pipeline for the combo _and_ each part, then merges them with attribution preserved in `sources`. Providers stay dumb about festival naming conventions.
-
-### 6. Progressive callbacks
-
-`onProviderResult` / `onArtistDone` / `onArtistComplete` / `onBudgetExhausted` — the UI updates as data arrives instead of waiting for the slowest provider. A cache layer must preserve this: cached hits fire the same callbacks with `cached: true`.
-
-### 7. Lookup endpoint (`functions/api/lookup.js`)
-
-As of Phase 2b, both providers go through one Pages Function: `GET /api/lookup?provider=&name=`. It runs the full search + candidate-selection + details + map pipeline server-side (via the shared pure mappers in `src/providers/*.map.js`), injects the Discogs token and MusicBrainz `User-Agent`, enforces a per-IP rate limit, and caches one mapped result per `(provider, normalisedName)` in KV — the shared L2 tier. Tokens never reach the browser. Any future authenticated provider should follow this pattern.
-
-### 8. UI shell
-
-Plain DOM, no framework, one `style.css`. `ui/graph/` is already separate from `ui/results.js`, so changes underneath `lookup.js` are invisible to the views. The interface is the part you want to keep — the architecture already supports that.
-
----
-
-## Where caching should be added
-
-> **Note (post-phase-1).** The section below describes the _browser_ cache (L1),
-> which Phase 1 shipped. It is per-browser and per-origin — it does **not** share
-> fetches between visitors. A shared server-side tier (L2) is added in Phase 1b
-> and consolidated in Phase 2b; see the Phasing list at the end of this doc and
-> the linked plan files. Read this section as "L1 design," not the whole story.
-
-**The problem.** The session-scoped `Map` in `lookup.js` is thrown away on reload. Every run re-fetches every artist, every alias, every member, even when the underlying data hasn't changed in months. MB and Discogs rate limits then dominate wall-clock time.
-
-**The principle.** Aliases, members, and group memberships are _high-stability_ data. An artist's MusicBrainz aliases don't change between lunchtime and dinner. A 30-day TTL would capture almost all real updates while turning most lookups into local-storage reads.
-
-### The cache seam: wrap `provider.lookup`
-
-The cleanest place to add caching is **between the queue and the provider**, not above the queue:
-
-```
-queue.run( cache.get_or_fetch( () => provider.lookup(name) ) )
-```
-
-- Cache hits skip the queue entirely (no rate-limit cost).
-- Cache misses go through the queue as today.
-- `cachedLookup` in `lookup.js` collapses to delegating to the persistent layer, and the in-run `Map` becomes a small write-through buffer to dedupe within a single run.
-
-### What to cache
-
-Keyed by `(provider.name, normaliseName(name))`:
-
-- The raw provider result: `{ aliases, groups, members, relatedProjects }`.
-- A timestamp (`fetchedAt`).
-- The schema version (so a result-shape change can invalidate the cache without a manual wipe).
-
-Not keyed by raw input casing — `normaliseName` is already the canonical key everywhere else.
-
-### Storage
-
-**IndexedDB**, not localStorage:
-
-- Lineups can produce hundreds of cached entries; localStorage's ~5 MB quota and synchronous API don't fit.
-- IndexedDB gives us a simple keyed store, async access, and room to grow into the graph model later (which will want indexed queries).
-- A thin wrapper (`src/core/cache.js`) keeps the rest of the codebase ignorant of IndexedDB specifics.
-
-### TTL policy
-
-- Default 30 days for `{ aliases, groups, members, relatedProjects }`.
-- Stale-on-error: if a refresh fetch fails, fall back to the stale cached value rather than the empty result.
-- Manual "refresh this artist" affordance later (out of scope for v1 of the cache).
-
-### Callback semantics
-
-`onProviderResult` already accepts `{ cached: boolean }`. The persistent cache should set this `true` for any hit not served from the in-run buffer. The UI can choose whether to surface this (subtle indicator, "fetched 12 days ago", etc.) — the data is already plumbed.
-
-### What does _not_ change
-
-- Provider modules (they still just return `{ aliases, groups, members, relatedProjects }`).
-- `mergeResults` (cached + live results merge identically).
-- Rate-limit queues (still needed for misses).
-- The expansion walker (still BFS, still budget-capped — though see next section).
-- The UI shell.
-
----
-
-## Where the graph model should be added
-
-**The problem.** The current pipeline rebuilds the same graph from scratch every time. Even with a result cache, the _traversal_ still runs as a recursive walk with a hop budget. The budget exists because each hop was a network round-trip; once hops are local, the budget concept is the wrong shape.
-
-**The deeper problem.** `closure: Set<normalisedName>` is an ad-hoc graph. `via` / `viaChain` / `viaHadMemberStep` is an ad-hoc edge-attribute system. The hard rules in `enqueueFromNode` (don't walk members of an alias-reached node, alias-with-members is a group, etc.) are graph-shape rules expressed as imperative control flow. The data model wants to be a graph; right now it's pretending to be a tree of merged result blobs.
-
-### The shape
-
-A small, local triple/quad store keyed on normalised names, with edges typed:
-
-```
-(subject, predicate, object, provenance)
-
-aka(person, person)         — identity-equivalent
-member_of(person, group)
-related_project(person, project)
-```
-
-Quads (with `provenance` carrying provider + sourceUrl + fetchedAt) preserve the source-attribution that `mergeResults` builds today.
-
-### Why a real graph helps
-
-- **Traversal becomes a query, not a recursion.** "What's the identity closure of X?" is a transitive query over `aka` edges. The fan-out cap and budget become rendering concerns, not fetching concerns.
-- **The hard-won rules become edge-typing rules.** "Don't walk members of an alias-reached node" is just "don't traverse `member_of` after traversing `aka` in this query." That's enforceable in one place instead of as scattered guards.
-- **Cluster union is free.** Two lineup rows that turn out to be the same identity share nodes by construction; no special closure-merging step.
-- **The cache and the graph become the same thing.** A cached MB lookup _is_ a set of edges with a `fetchedAt` timestamp. The result-blob cache and the graph store collapse into one substrate.
-- **New providers add edges, not blobs.** Wikidata's `same_as` becomes another `aka` edge with different provenance.
-
-### What to use
-
-Probably **not** a full SPARQL engine — the overhead and bundle size aren't justified for the query shapes we actually run. More likely:
-
-- IndexedDB-backed quad store with a small handful of indexes (`by-subject`, `by-predicate-object`).
-- A tiny query layer that covers our actual needs: transitive `aka` closure, bounded `member_of` walks, "is X a lineup root?".
-- Keep SPARQL/RDF terminology for predicates and serialisation (so we can export, and so the conceptual model stays clean), without taking on a query engine.
-
-### Phasing
-
-The graph model is **strictly downstream** of the cache. Caching itself grew a
-second axis once we realised a _shared_ cache was wanted (one visitor warming the
-cache for the next), which the original phase 1 — a per-browser IndexedDB cache —
-does not provide. So the cache track now has sub-phases before the graph work:
-
-1. **Phase 1 — browser cache (done).** Wrap `provider.lookup`, persist results in
-   per-browser IndexedDB (L1), keep the current walker. Minimal disruption;
-   immediate per-user UX win. See [PHASE1_CACHE_PLAN.md](./PHASE1_CACHE_PLAN.md).
-2. **Phase 1b — server-side shared cache (HTTP-level) (done, since superseded).**
-   A shared L2 cache in KV at the proxy boundary, keyed by upstream URL, so
-   fetches are shared across visitors. Replaced by Phase 2b — the raw-HTTP edge
-   cache and the per-provider proxies it wrapped have been removed.
-   See [PHASE1B_SHARED_CACHE_PLAN.md](./PHASE1B_SHARED_CACHE_PLAN.md).
-3. **Phase 2b — mapped-result consolidation (done).** Mapping moved server-side
-   into `functions/api/lookup.js`, which caches the mapped
-   `(provider, normalisedName)` result in KV. L1 (IndexedDB) and L2 (KV) now share
-   the same key shape and one `SCHEMA_VERSION` (`src/core/schemaVersion.js`),
-   collapsing them into two tiers of one cache. Browser providers are thin clients
-   over `/api/lookup`. This is the server-side precondition for a _shared_ graph
-   store. See [PHASE2B_MAPPED_CACHE_PLAN.md](./PHASE2B_MAPPED_CACHE_PLAN.md).
-4. **Phase 2 — graph substrate (done).** The L2 value store is now a D1 quad
-   graph. On write, the mapped result decomposes into typed quads
-   (`aka` / `member_of` / `related_project`) via `src/core/quads.js` and is stored
-   through `functions/_lib/quadStore.js`, keyed by `source_key`. On read the blob
-   is reconstituted from that lookup's quads — substrate-only, so the returned
-   JSON, the `/api/lookup` contract, and the browser walker are unchanged. The
-   `by-subject` / `by-predicate-object` indexes are created now so Phase 3 needs
-   no migration. KV stays for rate limiting + the Anthropic ceiling. See
-   [PHASE2_GRAPH_PLAN.md](./PHASE2_GRAPH_PLAN.md).
-5. **Phase 3 — query-shaped traversal.** Retire the BFS loop in favour of typed
-   graph queries. `closure`, `via`, `viaChain` either disappear or become query
-   metadata. The expansion _rules_ survive — they just move from control flow to
-   query constraints. Split into:
-   - **Phase 3a — substrate query layer (done).** `src/core/closure.js`
-     re-expresses the BFS rules as a pure query over the quad store, reading a
-     node's edges _across_ `source_key`s (`getQuadsTouching` in
-     `functions/_lib/quadStore.js`) so MB + Discogs union into one cross-provider
-     view — the cross-lookup edges Phase 2 deferred. Ships dormant: nothing in the
-     live path imports it; the browser BFS is untouched. Substrate-only, mirroring
-     Phase 2. See [PHASE3_QUERY_PLAN.md](./PHASE3_QUERY_PLAN.md).
-   - **Phase 3b — server-side traversal (pending).** A `/api/closure` endpoint
-     drives cold-node fetches, runs the query, and returns the expanded result; the
-     browser BFS is retired. Confronts the progressive-UI (streaming) decision.
-     Tracked in TODO.md.
-
-Each phase is shippable on its own. Each preserves the provider contract, the UI
-shell, the rate-limit queues, and the merge primitives.
-
----
-
-## What should not change (summary)
-
-- Provider contract.
-- `normaliseName` and source-attributed merging.
-- Per-provider rate-limit queues (still needed for cache misses).
-- Progressive callbacks.
-- The expansion rules — even if the loop dissolves into a graph query.
-- Collab splitting in the orchestrator.
-- Discogs / extract Pages Function proxies.
-- The UI.
-
-## What is naturally rethought along the way
-
-- The in-run `Map` cache collapses into the persistent cache.
-- `closure: Set<name>` is subsumed by the graph itself.
-- `via` / `viaChain` / `viaHadMemberStep` become typed edge attributes.
-- The `MAX_EXPANSION_LOOKUPS` budget stops being about politeness and starts being about render scope.
-- The recursive walker in `expandIdentityGraph` becomes a query against the graph store.
+## The substrate: a D1 quad store
+
+The rewrite's core idea: a cached lookup **is** a set of graph edges, so the cache
+and the graph are one store. `/api/lookup` runs search → candidate-pick → details
+→ map server-side (via the pure `*.map.js` mappers, with the Discogs token / MB
+User-Agent injected), then **decomposes** the mapped result into typed quads
+(`src/core/quads.js`) and stores them in D1 (`server/_lib/quadStore.js`), keyed by
+`source_key = ${provider}:${normalisedName}`. A read **reconstitutes** the same
+blob from that lookup's quads, so the `/api/lookup` JSON is byte-identical to the
+pre-graph version.
+
+- **Predicates** (see `quads.js` for the canonical set): `aka` (identity-
+  equivalent), `member_of`, `related_project`, each carrying provenance
+  (provider + `sourceUrl` + `fetchedAt`).
+- **Freshness.** Non-empty results get a long TTL, empties a short one. D1 has no
+  TTL of its own, so an expired row's quads simply linger — which is exactly what
+  enables **stale-on-error** (serve the old edges when an upstream is down). The
+  flip side is no automatic GC; see TODO.md.
+- **Cross-provider union.** `getQuadsTouching(key)` reads a node's edges across
+  every `source_key`, so MB + Discogs finally union per node instead of being two
+  separate blobs. This is what makes the closure a real cross-source graph.
+
+## The closure query, and its hard-won rules
+
+`server/api/closure.js` drives the walk: for each node it calls `handleLookup`
+(reusing the `/api/lookup` HIT/MISS/STALE + write path) to populate the substrate,
+then reads the cross-provider union and runs `identityClosure`
+(`src/core/closure.js`) — the BFS re-expressed as a pure query over the quads.
+
+The expansion **rules** are the crown jewels — re-learned slowly if ever lost — and
+live as documented code, not here. The summary, with pointers:
+
+- **Identity-only traversal.** Follow `aka` edges, and `member_of` _only_ for nodes
+  that are themselves groups. Never fan a person out through their `groups` /
+  `related_project` (that's "people they play with," not "the same person") — except
+  when the neighbour is itself a lineup root, which is registered without a lookup.
+- **Fan-out + budget caps** (`ALIAS_FANOUT_CAP`, `maxLookups`). A prolific-pseudonym
+  node registers its alias names for clustering but isn't walked into; a per-root
+  budget contains pathological wrong-match explosions. See `src/core/closure.js`.
+- **Foreign-identity guard.** A band-less alias stub that resolves to an unrelated
+  (often prolific) artist is registered for clustering but not fanned into, so one
+  poisoned alias edge can't drag a whole foreign discography into the cluster.
+  Rationale inline in `closure.js`.
+- **Collab attribution + edge reduction** (`src/core/graph.js`). `collectRelations`
+  attributes each relation to the specific combo _part_ that hosts it (`rel.owners`,
+  one hop per owning part); `buildEdge` drops bridge rows that are circular noise
+  (a part already shown by its own node, or a hub that is itself another lineup
+  node — triangle-reduces to a star). Rationale inline in `graph.js`.
+
+## Invariants — what should not change
+
+These compose cleanly and everything else leans on them:
+
+- **The provider seam.** A source is a pure `*.map.js` mapper (`pickMatch` +
+  `mapDetails`) returning `{ aliases, groups, members, relatedProjects }`. The
+  orchestrator never branches on provider identity; adding Wikidata is a new
+  mapper plus a one-line registration in `server/api/lookup.js`, nothing else.
+- **`normaliseName` + source-attributed merge** (`merge.js`). The single canonical
+  key, used everywhere; cached and live edges fold together with no special-casing.
+- **Progressive SSE callbacks.** `provider` / `progress` / `budget` / `done` keep
+  the graph filling as data arrives; the UI never waits on the slowest node.
+- **Collab splitting stays client-side.** `/api/closure` is single-root by design;
+  `lookupAll` owns the "X vs Y" split and stream-merge.
+- **Bindings sit behind adapters** (`server/_lib/*`). The only Cloudflare-specific
+  surface is KV, D1, and the RateLimiter DO — each behind one small module — so the
+  WinterCG-standard `fetch()` handler stays portable.
+
+## Deliberately retired — do not reintroduce
+
+The rewrite removed these on purpose; resurrecting them would undo it:
+
+- **The browser BFS.** `expandIdentityGraph` / `enqueueFromNode` and the per-run
+  session `Map` cache are gone from `lookup.js` — the walk is server-side now, the
+  expansion rules live solely in `src/core/closure.js`.
+- **The L1 IndexedDB cache** (`src/core/cache.js`) — the shared D1 L2 superseded it;
+  `SCHEMA_VERSION` is now a single-tier key.
+- **The thin browser provider clients** (`providers/{musicbrainz,discogs}.js`) and
+  `fetchJson.js` — only the pure `*.map.js` mappers remain.
+- **Per-provider `createQueue` pacing** (`src/core/rateLimit.js`). Global Discogs
+  pacing is now the RateLimiter DO; MB stays best-effort (cache only).
+
+## External data sources
+
+Both lookups go through `/api/lookup`, which injects credentials server-side
+(tokens never reach the browser) and shares the D1 cache across visitors.
+
+- **MusicBrainz.** No auth; rate limit 1 req/sec. The proxy sets the descriptive
+  `User-Agent` MB wants (the browser forbids that header). MB's global 1/sec stays
+  **best-effort** — the per-IP cap on `/api/lookup` is abuse protection, not MB's
+  limit, so concurrent cold lookups can still stampede past 1/sec; we accept that
+  (gating MB would serialise big cold runs into multi-minute crawls).
+- **Discogs.** Requires a personal access token; 60 req/min authenticated. Enforced
+  globally by the RateLimiter DO token bucket so parallel closures can't stampede
+  it. `fetchWithRetry` (honouring `Retry-After`, capped 60 s) is the backstop.
+- **Transient errors.** 429 / 5xx retry with backoff + jitter; anything else
+  surfaces as a provider failure — the node usually still has data from the other
+  provider, and a warm re-run clears it.
+
+## Principles & conventions
+
+- **Scope discipline.** v1 is intentionally tight; features beyond the brief
+  (accounts, Wikidata, graph viz, scraping) trigger a conversation before code.
+- **One fetch per user action.** The extraction layer fetches once what the user
+  explicitly asked for — no crawling, no background scraping, no robots.txt games.
+- **Providers are leaves.** A mapper knows nothing about other providers, the
+  cache, or the UI — see the provider-seam invariant above.
+- **Progressive > complete.** First byte beats lowest latency to full results.
+- **No framework.** Plain DOM, plain ES modules, plain CSS — readable within
+  minutes of cloning.
+- **Tests are pure + fast.** Cores are unit-tested with injected `fetchFn` / `sleep`
+  and fixture captures under `tests/fixtures/` — no real timers or network. MB
+  fixtures are real captures; Discogs fixtures are synthesised (tagged `_note`)
+  pending a token.

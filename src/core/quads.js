@@ -13,7 +13,8 @@
 //
 // Reconstitution scopes to a single producing lookup (`sourceKey`) so the blob
 // round-trips exactly and no edges leak in from other lookups — that wider,
-// cross-lookup view is deliberately Phase 3, not Phase 2. See PHASE2_GRAPH_PLAN.md.
+// cross-lookup view is the closure query's job (server/api/closure.js,
+// getQuadsTouching), not this round-trip's.
 
 import { emptyResult } from '../providers/provider.js';
 import { normaliseName } from './merge.js';

@@ -3,5 +3,4 @@
 // same mapped-result shape, so bumping this single constant invalidates every
 // entry coherently (old entries TTL out; no migration). The former L1 browser
 // IndexedDB cache was removed once the identity walk moved server-side.
-// See PHASE2B_MAPPED_CACHE_PLAN.md.
 export const SCHEMA_VERSION = 1;
