@@ -309,6 +309,7 @@ body > #app {
 
 .url-wrap .url-input {
   padding-left: 40px;
+  padding-right: 40px;
   padding-top: 14px;
   padding-bottom: 14px;
 }
@@ -322,6 +323,41 @@ body > #app {
   font-size: 12px;
   color: var(--fg-dimmer);
   pointer-events: none;
+}
+
+.field-hint {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--fg-dimmer);
+  text-transform: uppercase;
+}
+
+.url-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.url-remove {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  font-family: var(--mono);
+  font-size: 18px;
+  line-height: 1;
+  color: var(--fg-dimmer);
+  transition: color 0.12s ease;
+}
+
+.url-remove:hover {
+  color: var(--accent);
 }
 
 .divider-or {

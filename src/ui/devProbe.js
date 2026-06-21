@@ -52,13 +52,16 @@ export function createDevProbe() {
     el.hidden = true;
   }
 
-  function onAttempt({ path, state, attempts, reason }) {
+  function onAttempt({ path, state, attempts, reason, url }) {
     el.hidden = false;
 
-    let li = rows.get(path);
+    // With several lineup URLs in one run, each shares the same `path`
+    // ('direct'/'reader'), so key the row by url+path to keep them distinct.
+    const key = url ? `${url}::${path}` : path;
+    let li = rows.get(key);
     if (!li) {
       li = document.createElement('li');
-      rows.set(path, li);
+      rows.set(key, li);
       list.append(li);
     }
 
@@ -71,7 +74,9 @@ export function createDevProbe() {
 
     li.className = `dev-probe-item state-${state}`;
 
-    const parts = [`${path} \u2192 ${state}`];
+    const parts = [];
+    if (url) parts.push(shortenUrl(url));
+    parts.push(`${path} \u2192 ${state}`);
     if (Array.isArray(attempts) && attempts.length) {
       parts.push(`attempts=${attempts.length}`);
       const last = attempts[attempts.length - 1];
@@ -82,6 +87,17 @@ export function createDevProbe() {
     if (state === 'fail' && reason) parts.push(reason);
 
     li.textContent = parts.join(' \u00b7 ');
+  }
+
+  // Compact a lineup URL to host + last path segment for the attempt row.
+  function shortenUrl(url) {
+    try {
+      const u = new URL(url);
+      const tail = u.pathname.replace(/\/$/, '').split('/').filter(Boolean).pop();
+      return tail ? `${u.host}/${tail}` : u.host;
+    } catch {
+      return url.slice(0, 40);
+    }
   }
 
   function note(text) {

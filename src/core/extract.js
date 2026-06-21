@@ -1,4 +1,5 @@
 import { parseLineup } from '../ui/inputScreen.js';
+import { dedupeNames } from './merge.js';
 import { HAIKU, SONNET } from './models.js';
 
 const SYSTEM_PROMPT_TEXT = `You extract artist and performer names from text related to music festivals or events.
@@ -87,6 +88,15 @@ export async function extractArtists(content, { type, signal, fetchFn = fetch, o
   return {
     artists: Array.isArray(result.artists) ? result.artists : [],
   };
+}
+
+// Merge the artist lists from several extractions (e.g. one festival lineup page
+// per stage) into one flat, de-duplicated lineup. `dedupeNames` is the same
+// case-insensitive, trim-aware primitive `parseLineup` uses, so a name appearing
+// on two pages collapses to one node downstream.
+export function combineExtractions(lists) {
+  const names = (lists ?? []).flatMap((r) => (Array.isArray(r?.artists) ? r.artists : []));
+  return { artists: dedupeNames(names) };
 }
 
 export function looksUnderExtracted(artists, inputChars) {

@@ -22,6 +22,8 @@ const EXAMPLE_LINEUP = [
   'Growling Mad Scientists',
 ].join('\n');
 
+const MAX_URLS = 10;
+
 export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   const root = document.createElement('div');
   root.className = 'screen screen-input';
@@ -64,15 +66,14 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
         <span class="divider-rule"></span>
       </div>
 
-      <label class="field field-url">
+      <div class="field field-url">
         <div class="field-labelrow">
           <span class="field-label">Link to a lineup</span>
+          <span class="field-hint">One per stage &middot; we merge them</span>
         </div>
-        <div class="url-wrap">
-          <span class="url-prefix">&#x2197;</span>
-          <input type="text" class="url-input" placeholder="https://festival.example/lineup" />
-        </div>
-      </label>
+        <div class="url-list"></div>
+        <button type="button" class="link-btn url-add">+ Add another URL</button>
+      </div>
 
       <div class="decode-row">
         <button type="button" class="decode-btn" disabled>
@@ -89,7 +90,8 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   `;
 
   const textarea = root.querySelector('.lineup-input');
-  const urlInput = root.querySelector('.url-input');
+  const urlList = root.querySelector('.url-list');
+  const urlAdd = root.querySelector('.url-add');
   const decodeBtn = root.querySelector('.decode-btn');
   const exampleBtn = root.querySelector('.example-btn');
   const counter = root.querySelector('.decode-counter');
@@ -103,10 +105,78 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
     pasteFormat = null;
   }
 
+  // ---- URL rows (one per festival stage page; merged on submit) ----
+
+  function urlInputs() {
+    return [...urlList.querySelectorAll('.url-input')];
+  }
+
+  // Trimmed, non-empty, de-duplicated URLs in row order.
+  function collectUrls() {
+    const seen = new Set();
+    const urls = [];
+    for (const input of urlInputs()) {
+      const value = input.value.trim();
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      urls.push(value);
+    }
+    return urls;
+  }
+
+  function syncRowChrome() {
+    const rows = [...urlList.querySelectorAll('.url-wrap')];
+    // The remove button is pointless when a single empty row is all there is.
+    const removable = rows.length > 1;
+    for (const row of rows) {
+      row.querySelector('.url-remove').hidden = !removable;
+    }
+    urlAdd.hidden = rows.length >= MAX_URLS;
+  }
+
+  function addUrlRow(focus = false) {
+    if (urlList.querySelectorAll('.url-wrap').length >= MAX_URLS) return;
+    const row = document.createElement('div');
+    row.className = 'url-wrap';
+    row.innerHTML = `
+      <span class="url-prefix">&#x2197;</span>
+      <input type="text" class="url-input" placeholder="https://festival.example/lineup" />
+      <button type="button" class="url-remove" aria-label="Remove URL">&times;</button>
+    `;
+    row.querySelector('.url-input').addEventListener('input', onUrlInput);
+    row.querySelector('.url-remove').addEventListener('click', () => removeUrlRow(row));
+    urlList.append(row);
+    syncRowChrome();
+    if (focus) row.querySelector('.url-input').focus();
+  }
+
+  function removeUrlRow(row) {
+    onCancel?.();
+    row.remove();
+    if (urlList.querySelectorAll('.url-wrap').length === 0) addUrlRow();
+    syncRowChrome();
+    updateCounter();
+  }
+
+  // Back to a single empty row (mutual exclusion: textarea wins).
+  function resetUrlRows() {
+    urlList.replaceChildren();
+    addUrlRow();
+  }
+
+  function onUrlInput() {
+    onCancel?.();
+    if (collectUrls().length) {
+      textarea.value = '';
+      clearPasteState();
+    }
+    updateCounter();
+  }
+
   function updateCounter() {
     const text = textarea.value.trim();
-    const url = urlInput.value.trim();
-    const hasInput = Boolean(text || url);
+    const urls = collectUrls();
+    const hasInput = Boolean(text || urls.length);
     decodeBtn.disabled = !hasInput;
     if (!hasInput) {
       counter.textContent = '';
@@ -115,9 +185,11 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
     const lines = text ? text.split(/\n+/).filter(Boolean).length : 0;
     const bits = [];
     if (lines) bits.push(`${lines} line${lines === 1 ? '' : 's'}`);
-    if (url) bits.push(bits.length ? '+ 1 url' : '1 url');
+    if (urls.length) bits.push(`${urls.length} url${urls.length === 1 ? '' : 's'}`);
     counter.textContent = bits.join(' · ');
   }
+
+  addUrlRow();
 
   textarea.addEventListener('paste', (event) => {
     onCancel?.();
@@ -136,22 +208,15 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
     onCancel?.();
     if (justPasted) justPasted = false;
     else clearPasteState();
-    if (textarea.value.trim()) urlInput.value = '';
+    if (textarea.value.trim()) resetUrlRows();
     updateCounter();
   });
 
-  urlInput.addEventListener('input', () => {
-    onCancel?.();
-    if (urlInput.value.trim()) {
-      textarea.value = '';
-      clearPasteState();
-    }
-    updateCounter();
-  });
+  urlAdd.addEventListener('click', () => addUrlRow(true));
 
   exampleBtn.addEventListener('click', () => {
     textarea.value = EXAMPLE_LINEUP;
-    urlInput.value = '';
+    resetUrlRows();
     clearPasteState();
     pasteFormat = 'plain-text';
     updateCounter();
@@ -159,10 +224,10 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   });
 
   decodeBtn.addEventListener('click', () => {
-    const url = urlInput.value.trim();
+    const urls = collectUrls();
     const text = textarea.value.trim();
-    if (url) {
-      onSubmit?.({ type: 'url', value: url });
+    if (urls.length) {
+      onSubmit?.({ type: 'url', urls });
     } else if (text && pastedHTML) {
       onSubmit?.({ type: 'paste-html', value: text, html: pastedHTML, pasteFormat: 'html' });
     } else if (text) {

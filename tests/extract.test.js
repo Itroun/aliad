@@ -4,6 +4,7 @@ import {
   extractArtists,
   callLLM,
   looksUnderExtracted,
+  combineExtractions,
 } from '../src/core/extract.js';
 import messy from './fixtures/anthropic-extract-messy-text.json';
 import html from './fixtures/anthropic-extract-html.json';
@@ -103,6 +104,31 @@ describe('looksUnderExtracted', () => {
 
   it('does not flag large inputs with plenty of artists', () => {
     expect(looksUnderExtracted(Array(30).fill('x'), 10000)).toBe(false);
+  });
+});
+
+describe('combineExtractions', () => {
+  it('merges several extraction results into one deduped lineup', () => {
+    const merged = combineExtractions([
+      { artists: ['Atmos', 'Filteria'] },
+      { artists: ['Filteria', 'DOOF'] },
+    ]);
+    expect(merged.artists).toEqual(['Atmos', 'Filteria', 'DOOF']);
+  });
+
+  it('dedupes case-insensitively across pages', () => {
+    const merged = combineExtractions([{ artists: ['Shpongle'] }, { artists: ['shpongle'] }]);
+    expect(merged.artists).toEqual(['Shpongle']);
+  });
+
+  it('skips empty / malformed results', () => {
+    const merged = combineExtractions([{ artists: ['Atmos'] }, {}, null, { artists: null }]);
+    expect(merged.artists).toEqual(['Atmos']);
+  });
+
+  it('returns an empty lineup for no input', () => {
+    expect(combineExtractions([]).artists).toEqual([]);
+    expect(combineExtractions().artists).toEqual([]);
   });
 });
 

@@ -4,7 +4,7 @@ import { createGraphScreen } from './ui/graphScreen.js';
 import { createEmptyGraphScreen } from './ui/emptyGraphScreen.js';
 import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
-import { detectInputType, extractArtists } from './core/extract.js';
+import { detectInputType, extractArtists, combineExtractions } from './core/extract.js';
 import { cleanHTML } from './core/cleanHTML.js';
 
 const app = document.querySelector('#app');
@@ -128,11 +128,7 @@ function extract(content, type, signal) {
 
 async function resolveInput(input, signal) {
   if (input.type === 'url') {
-    const { kind, body } = await fetchWithFallbacks(input.value, {
-      signal,
-      onAttempt: devProbe.onAttempt,
-    });
-    return extract(body, kind === 'html' ? 'html' : 'messy-text', signal);
+    return resolveUrls(input.urls, signal);
   }
 
   if (input.type === 'paste-html') {
@@ -144,6 +140,49 @@ async function resolveInput(input, signal) {
   }
 
   return resolveText(input.value, signal);
+}
+
+// Festivals often split their lineup across several pages (one per stage). Fetch
+// and extract each URL in parallel, then merge into one flat lineup so the graph
+// clusters across the whole festival. A page that fails to fetch/parse is skipped
+// with a warning rather than failing the whole submission.
+async function resolveUrls(urls, signal) {
+  const results = await Promise.allSettled(
+    urls.map(async (url) => {
+      const { kind, body } = await fetchWithFallbacks(url, {
+        signal,
+        onAttempt: (attempt) => devProbe.onAttempt({ ...attempt, url }),
+      });
+      return extract(body, kind === 'html' ? 'html' : 'messy-text', signal);
+    }),
+  );
+
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+  const extracted = [];
+  results.forEach((result, i) => {
+    if (result.status === 'fulfilled') {
+      extracted.push(result.value);
+    } else {
+      // Surface the skip as a fail row beside this URL's fetch attempts (rather
+      // than a note that gets buried under the later graph-walk output), so it's
+      // obvious which page dropped out of the lineup.
+      devProbe.onAttempt({
+        url: urls[i],
+        path: 'skipped',
+        state: 'fail',
+        reason: 'page skipped — not included in lineup',
+      });
+    }
+  });
+
+  if (!extracted.length) {
+    throw new Error(
+      'Could not fetch any of those URLs (fetch or parse failed for every link). Check the links, or paste the lineup text instead.',
+    );
+  }
+
+  return combineExtractions(extracted);
 }
 
 function resolveText(text, signal) {
