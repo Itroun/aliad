@@ -4,6 +4,4 @@ dist
 .env.local
 .dev.vars
 .wrangler
-.DS_Store
 *.log
-CLAUDE.md
