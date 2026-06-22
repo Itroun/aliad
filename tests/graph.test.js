@@ -68,6 +68,96 @@ describe('buildGraph', () => {
     ]);
   });
 
+  it('collapses multiple shared aliases of one person into a single connection', () => {
+    // One human is Federico Baltimore, Dado, and also Synthetic / Frédéric
+    // Holyszewski / Electric Boy. Two of those aliases are lineup acts (the solo
+    // "Federico Baltimore" and the Dado half of "Dado vs Dino Psaras"), so the
+    // other three each surface as an "aka Federico Baltimore · aka Dado" bridge —
+    // all restating the single fact that the two acts are the same identity.
+    const shared = ['Synthetic', 'Frédéric Holyszewski', 'Electric Boy'];
+    const mk = (aliases) => ({
+      aliases: aliases.map((n) => ({ name: n })),
+      members: [],
+      groups: [],
+      relatedProjects: [],
+    });
+    const dadoMerged = mk(['Federico Baltimore', ...shared]);
+    const combo = {
+      name: 'Dado vs Dino Psaras',
+      merged: mk(['Federico Baltimore', ...shared]),
+      closure: new Set([
+        normaliseName('Dado vs Dino Psaras'),
+        'dado',
+        'dino psaras',
+        normaliseName('Federico Baltimore'),
+        ...shared.map(normaliseName),
+      ]),
+      parts: ['Dado', 'Dino Psaras'],
+      sources: [
+        { name: 'Dado vs Dino Psaras', merged: mk(['Federico Baltimore', ...shared]) },
+        { name: 'Dado', merged: dadoMerged },
+        { name: 'Dino Psaras', merged: mk([]) },
+      ],
+    };
+    const { clusters } = buildGraph([
+      entry('Federico Baltimore', { aliases: ['Dado', ...shared] }),
+      combo,
+    ]);
+    expect(clusters).toHaveLength(1);
+    const edge = clusters[0].edges[0];
+    // Three shared aliases (plus the direct aka the combo's Dado part carries)
+    // all restate one identity, so they collapse to a single aka-only row that
+    // links Federico Baltimore and Dado.
+    expect(edge.evidence).toHaveLength(1);
+    const row = edge.evidence[0];
+    expect(row.hops.every((h) => h.rel === 'aka')).toBe(true);
+    const names = new Set([row.person, ...row.hops.map((h) => h.with)].map(normaliseName));
+    expect(names.has('dado')).toBe(true);
+    expect(names.has(normaliseName('Federico Baltimore'))).toBe(true);
+  });
+
+  it('prefers a direct aka between the two nodes over a third-alias bridge', () => {
+    // DOOF and Nick Barber are the same person (DOOF lists Nick Barber as an
+    // alias), who also records as Sunyataji. The direct "DOOF aka Nick Barber"
+    // link is the clearest connection; the Sunyataji bridge merely restates it,
+    // so the edge should show a single direct aka row, not the third alias.
+    const per = [
+      entry('DOOF', { aliases: ['Nick Barber', 'Sunyataji'] }),
+      entry('Nick Barber', { aliases: ['DOOF', 'Sunyataji'] }),
+    ];
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges[0];
+    expect(edge.evidence).toHaveLength(1);
+    expect(edge.evidence[0].person).not.toBe('Sunyataji');
+    const names = new Set(
+      [edge.evidence[0].person, ...edge.evidence[0].hops.map((h) => h.with)].map(normaliseName),
+    );
+    expect(names.has('doof')).toBe(true);
+    expect(names.has(normaliseName('Nick Barber'))).toBe(true);
+  });
+
+  it('still lets a member-bridge suppress a band-to-band aka (alias-bridge does not)', () => {
+    // Guard for the other direction: when the shared identity is a *member*
+    // (Maurizio, Max), the band-to-band aka stays suppressed in its favour.
+    const per = [
+      entry('Etnica', { aliases: ['Pleiadians'], members: ['Maurizio', 'Max'] }),
+      entry('Pleiadians', { aliases: ['Etnica'], members: ['Maurizio', 'Max'] }),
+    ];
+    const { clusters } = buildGraph(per);
+    expect(clusters[0].edges[0].evidence.map((e) => e.person)).toEqual(['Maurizio', 'Max']);
+  });
+
+  it('keeps distinct shared members as separate connections (not collapsed)', () => {
+    // Two different humans in both bands — same hop signature, but member-of, so
+    // both must stay. Guards against the alias-collapse over-reaching.
+    const per = [
+      entry('Etnica', { members: ['Maurizio', 'Max'] }),
+      entry('Pleiadians', { members: ['Maurizio', 'Max'] }),
+    ];
+    const { clusters } = buildGraph(per);
+    expect(clusters[0].edges[0].evidence).toHaveLength(2);
+  });
+
   it('combines aka + member-of hops for an alias-to-group bridge', () => {
     // Dickster.aliases = [Dick Trevor]; Bumbling Loons.members = [Dick Trevor]
     const per = [
@@ -381,6 +471,48 @@ describe('buildGraph', () => {
       { rel: 'member of', with: 'Cosmosis' },
       { rel: 'member of', with: 'Laughing Buddha' },
       { rel: 'member of', with: 'Ultravibe' },
+    ]);
+  });
+
+  it('does not repeat a hop a via-mediated direct row already took through the bridge', () => {
+    // Solo "Cosmosis" ↔ "Cosmosis vs Laughing Buddha": the combo's member Jeremy
+    // is "member of Cosmosis · member of Laughing Buddha", and the combo also
+    // surfaces the solo "Cosmosis" node in its groups *via* Jeremy. The direct
+    // row therefore tacks "member of Cosmosis" onto Jeremy's own combo hops,
+    // duplicating it. The two are the same hop and must collapse to one.
+    const mergedOf = (members, groups = []) => ({
+      aliases: [],
+      members: members.map((n) => ({ name: n })),
+      groups: groups.map((g) => (typeof g === 'string' ? { name: g } : g)),
+      relatedProjects: [],
+    });
+    const combo = {
+      name: 'Cosmosis vs Laughing Buddha',
+      merged: mergedOf(['Jeremy Van Kampen'], [{ name: 'Cosmosis', via: 'Jeremy Van Kampen' }]),
+      closure: new Set([
+        normaliseName('Cosmosis vs Laughing Buddha'),
+        'cosmosis',
+        'laughing buddha',
+        'jeremy van kampen',
+      ]),
+      parts: ['Cosmosis', 'Laughing Buddha'],
+      sources: [
+        {
+          name: 'Cosmosis vs Laughing Buddha',
+          merged: mergedOf(['Jeremy Van Kampen'], [{ name: 'Cosmosis', via: 'Jeremy Van Kampen' }]),
+        },
+        { name: 'Cosmosis', merged: mergedOf(['Jeremy Van Kampen']) },
+        { name: 'Laughing Buddha', merged: mergedOf(['Jeremy Van Kampen']) },
+      ],
+    };
+    const solo = entry('Cosmosis', { members: ['Jeremy Van Kampen'] });
+    const { clusters } = buildGraph([solo, combo]);
+    const edge = clusters[0].edges[0];
+    const jeremy = edge.evidence.find((e) => e.person === 'Jeremy Van Kampen');
+    expect(jeremy).toBeTruthy();
+    expect(jeremy.hops).toEqual([
+      { rel: 'member of', with: 'Cosmosis' },
+      { rel: 'member of', with: 'Laughing Buddha' },
     ]);
   });
 

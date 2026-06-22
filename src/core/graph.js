@@ -138,10 +138,25 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
   const suppressed = [];
   const seenPersons = new Set();
 
+  // Collapse consecutive/duplicate identical (rel, with) hops in a chain. A
+  // via-mediated direct row can restate a step the bridge person already took —
+  // e.g. a combo whose member is "member of Cosmosis · member of Laughing Buddha"
+  // reaching the solo "Cosmosis" node tacks on a second "member of Cosmosis". The
+  // owner-name is the same on both, so it's the same hop said twice.
+  const dedupeHops = (hops) => {
+    const seen = new Set();
+    return hops.filter((h) => {
+      const k = `${h.rel} ${normaliseName(h.with)}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  };
+
   const pushEvidence = (personKey, person, hops) => {
     if (seenPersons.has(personKey)) return;
     seenPersons.add(personKey);
-    evidence.push({ person, hops });
+    evidence.push({ person, hops: dedupeHops(hops) });
   };
 
   // One hop per owning part — a person who belongs to several parts of a combo
@@ -171,6 +186,7 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
   // (same-named-part) bridges don't count: they're about to be dropped, so they
   // mustn't suppress a genuine hidden connection.
   let hasPersonBridge = false;
+  let hasMemberBridge = false;
   for (const [key, aEntry] of aRels) {
     if (key === aKey || key === bKey || isPartKey(key) || isOtherNode(key)) continue;
     const bEntry = bRels.get(key);
@@ -181,7 +197,11 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
       !sharesVisibleOwner(aEntry, bEntry)
     ) {
       hasPersonBridge = true;
-      break;
+      // A member on either side is a *different kind* of fact than a band-to-band
+      // aka, so it rightly suppresses the direct row (see the band-aka case). A
+      // pure alias-bridge is the same kind of fact as a direct aka, just less
+      // direct — so it must NOT suppress a direct aka between the two nodes.
+      if (aEntry.bucket === 'members' || bEntry.bucket === 'members') hasMemberBridge = true;
     }
   }
 
@@ -205,7 +225,13 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
       pushEvidence(otherKey, entry.displayName || otherName, ownerHops(entry, root));
     }
   };
-  if (!hasPersonBridge) {
+  // A direct, non-via aka straight between the two cluster nodes (one lists the
+  // other as an alias) is the clearest statement that they're one identity. It
+  // should survive an alias-bridge (a third shared alias just restates it) — but
+  // still yields to a member-bridge, which is different, more informative.
+  const directAkaEntry = aRels.get(bKey) ?? bRels.get(aKey);
+  const directAka = !!directAkaEntry && !directAkaEntry.viaKey && directAkaEntry.rel === 'aka';
+  if (!hasPersonBridge || (directAka && !hasMemberBridge)) {
     pushDirect(A.name, bKey, B.name, bRels, aRels);
     if (!seenPersons.has(aKey)) pushDirect(B.name, aKey, A.name, aRels, bRels);
   }
@@ -242,7 +268,44 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
     for (const row of suppressed) pushEvidence(row.key, row.person, row.hops);
   }
   if (evidence.length === 0) return null;
-  return { a: A.name, b: B.name, evidence };
+
+  // Collapse redundant alias chains. Every aka-only row asserts an identity
+  // equivalence among the names it touches (the bridge person + its hop owners).
+  // Within one edge, aka-only rows whose name-sets overlap describe the SAME
+  // human, so they're mutually redundant: three shared aliases of one person, or
+  // the two mirror directions of a direct "A aka B", all restate one fact. Union
+  // such rows by shared name and keep one representative — the most direct (fewest
+  // hops), so a direct "A aka B" wins over a third-alias bridge. Rows with a
+  // non-aka hop (shared members, group memberships) are different information and
+  // pass through untouched; name-sets that don't overlap stay separate, so a
+  // combo bridged by two different people on two different parts keeps both.
+  const isAkaOnly = (e) => e.hops.every((h) => h.rel === 'aka');
+  const akaNames = (e) =>
+    new Set([normaliseName(e.person), ...e.hops.map((h) => normaliseName(h.with))]);
+  const slots = []; // each: { group:true, names:Set, rep } | { row }
+  for (const e of evidence) {
+    if (!isAkaOnly(e)) {
+      slots.push({ row: e });
+      continue;
+    }
+    const names = akaNames(e);
+    const matches = slots.filter((s) => s.group && [...s.names].some((n) => names.has(n)));
+    if (matches.length === 0) {
+      slots.push({ group: true, names, rep: e });
+      continue;
+    }
+    const g = matches[0];
+    for (const n of names) g.names.add(n);
+    if (e.hops.length < g.rep.hops.length) g.rep = e;
+    // A row can bridge two previously-separate identity groups — merge them.
+    for (const other of matches.slice(1)) {
+      for (const n of other.names) g.names.add(n);
+      if (other.rep.hops.length < g.rep.hops.length) g.rep = other.rep;
+      slots.splice(slots.indexOf(other), 1);
+    }
+  }
+  const collapsed = slots.map((s) => (s.group ? s.rep : s.row));
+  return { a: A.name, b: B.name, evidence: collapsed };
 }
 
 export function buildGraph(perArtistResults) {
