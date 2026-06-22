@@ -83,35 +83,51 @@ export function createGraphScreen({ lineup, onViewChange }) {
     return { width: rect.width || 800, height: rect.height || 600 };
   }
 
-  function recomputeLayoutAndRender() {
-    const { width, height } = paneDims();
-    layout.resize({ width, height });
+  // Latest computed positions, reused by focus-only re-renders so a click never
+  // re-runs the force sim.
+  let lastPositions = new Map();
 
+  // Re-render with the CURRENT positions (no layout recompute). Used for focus
+  // changes (edge clicks): the sim is warm-started and not at equilibrium, so
+  // resuming it on every click would drift clusters around until it settles —
+  // a focus change must not move the graph.
+  function render() {
+    const { width, height } = paneDims();
     const clusterNames = [...clusterMembers()];
     const edges = allEdges();
-    const positions =
-      clusterNames.length > 0
-        ? layout.compute({ clusters: currentGraph.clusters }, firstLayoutRun ? 250 : 70)
-        : new Map();
-    firstLayoutRun = false;
-
     const focusedKey = manualFocusKey ?? autoFocusKey;
-    const focusedEdge = allEdges().find((e) => edgeKey(e) === focusedKey) || null;
+    const focusedEdge = edges.find((e) => edgeKey(e) === focusedKey) || null;
 
     pane.update({
       width,
       height,
       nodes: clusterNames,
       edges,
-      positions,
+      positions: lastPositions,
       focusedEdgeKey: focusedKey,
       onEdgeClick: (edge) => {
         manualFocusKey = edgeKey(edge);
-        recomputeLayoutAndRender();
+        render();
       },
     });
     focusPanel.update(focusedEdge);
     renderSingletons();
+  }
+
+  // Recompute layout (runs the sim) THEN render. Only for real changes: new
+  // data arriving (scheduleRelayout) and resize.
+  function recomputeLayoutAndRender() {
+    const { width, height } = paneDims();
+    layout.resize({ width, height });
+
+    const clusterNames = [...clusterMembers()];
+    lastPositions =
+      clusterNames.length > 0
+        ? layout.compute({ clusters: currentGraph.clusters }, firstLayoutRun ? 250 : 70)
+        : new Map();
+    firstLayoutRun = false;
+
+    render();
   }
 
   function renderSingletons() {

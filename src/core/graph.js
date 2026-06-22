@@ -144,16 +144,42 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
     evidence.push({ person, hops });
   };
 
+  // One hop per owning part — a person who belongs to several parts of a combo
+  // contributes a hop for each ("member of Cosmosis · member of Laughing Buddha").
+  // `owners` is always populated by collectRelations (falling back to the combo
+  // name); `root` is a defensive fallback for entries built without it.
+  const ownerHops = (entry, root) =>
+    (entry.owners ?? [{ name: root, rel: entry.rel }]).map((o) => ({ rel: o.rel, with: o.name }));
+
+  // An "obvious" bridge: the shared identity is hosted by the SAME visibly-named
+  // part on both sides — e.g. solo "Process" ↔ "Process vs Aether", or
+  // "Process vs Aether" ↔ "Process vs Bob" (both labels literally say Process).
+  // The owner name on each side is what's printed in the lineup, so the user can
+  // already see this link; it's not a reveal. We drop such bridges. A bridge
+  // through a *hidden* identity — different owner names on each side, e.g. "X is
+  // secretly a member of Aether" — is exactly the non-obvious connection we exist
+  // to surface, so those stay.
+  const sharesVisibleOwner = (aEntry, bEntry) => {
+    const aKeys = new Set(ownerHops(aEntry, A.name).map((h) => normaliseName(h.with)));
+    return ownerHops(bEntry, B.name).some((h) => aKeys.has(normaliseName(h.with)));
+  };
+
   // A "person-bridge" row is a shared identity that appears as a person on
   // both sides (in aliases or members). When one exists, every via-mediated
   // row — direct or bridge — is redundant noise: the same connector is
-  // already covered by the person-bridge row, just expressed honestly.
+  // already covered by the person-bridge row, just expressed honestly. Obvious
+  // (same-named-part) bridges don't count: they're about to be dropped, so they
+  // mustn't suppress a genuine hidden connection.
   let hasPersonBridge = false;
   for (const [key, aEntry] of aRels) {
     if (key === aKey || key === bKey || isPartKey(key) || isOtherNode(key)) continue;
     const bEntry = bRels.get(key);
     if (!bEntry) continue;
-    if (PERSON_BUCKETS.has(aEntry.bucket) && PERSON_BUCKETS.has(bEntry.bucket)) {
+    if (
+      PERSON_BUCKETS.has(aEntry.bucket) &&
+      PERSON_BUCKETS.has(bEntry.bucket) &&
+      !sharesVisibleOwner(aEntry, bEntry)
+    ) {
       hasPersonBridge = true;
       break;
     }
@@ -161,13 +187,6 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
 
   const groupBucketRel = (entry) =>
     entry.bucket === 'relatedProjects' ? 'related to' : 'member of';
-
-  // One hop per owning part — a person who belongs to several parts of a combo
-  // contributes a hop for each ("member of Cosmosis · member of Laughing Buddha").
-  // `owners` is always populated by collectRelations (falling back to the combo
-  // name); `root` is a defensive fallback for entries built without it.
-  const ownerHops = (entry, root) =>
-    (entry.owners ?? [{ name: root, rel: entry.rel }]).map((o) => ({ rel: o.rel, with: o.name }));
 
   // Direct relationship: B appears in A's merged (or vice-versa).
   // For via-mediated entries (e.g. B reached through some member/alias X), we
@@ -205,6 +224,9 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
     // through a different person — that's two acts both connected to a third
     // act, not actually connected to each other.
     if (aEntry.viaKey && bEntry.viaKey && aEntry.viaKey !== bEntry.viaKey) continue;
+    // Drop "obvious" bridges hosted by the same visibly-named part on both
+    // sides — the user can read this link straight off the labels.
+    if (sharesVisibleOwner(aEntry, bEntry)) continue;
     const row = {
       key,
       person: aEntry.displayName || bEntry.displayName,
@@ -289,7 +311,48 @@ export function buildGraph(perArtistResults) {
         if (edge) edges.push(edge);
       }
     }
-    clusters.push({ id: `c${root}`, nodes, edges });
+
+    // Re-derive clusters as connected components of the SURVIVING edges, not the
+    // union-find closure. Suppressing an edge (e.g. an "obvious" same-named-part
+    // bridge) can split a group apart or strand a node — a lone "Process" left
+    // after dropping its tie to "Process vs Aether" should fall out as a
+    // singleton, not float edgeless inside a cluster.
+    const adj = new Map(nodes.map((name) => [name, []]));
+    for (const e of edges) {
+      adj.get(e.a).push(e.b);
+      adj.get(e.b).push(e.a);
+    }
+    const seen = new Set();
+    const comps = [];
+    for (const start of nodes) {
+      if (seen.has(start)) continue;
+      const comp = [];
+      const queue = [start];
+      seen.add(start);
+      while (queue.length > 0) {
+        const cur = queue.shift();
+        comp.push(cur);
+        for (const nb of adj.get(cur)) {
+          if (!seen.has(nb)) {
+            seen.add(nb);
+            queue.push(nb);
+          }
+        }
+      }
+      if (comp.length < 2) singletons.push(comp[0]);
+      else comps.push(comp);
+    }
+    // Keep the plain `c${root}` id when the group stays whole; only suffix when a
+    // group actually splits into several clusters, so ids stay stable + tidy.
+    comps.forEach((comp, k) => {
+      const members = new Set(comp);
+      const compEdges = edges.filter((e) => members.has(e.a) && members.has(e.b));
+      clusters.push({
+        id: comps.length > 1 ? `c${root}_${k}` : `c${root}`,
+        nodes: comp,
+        edges: compEdges,
+      });
+    });
   }
 
   return { clusters, singletons };

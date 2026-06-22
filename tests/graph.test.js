@@ -294,14 +294,13 @@ describe('buildGraph', () => {
         groups: [{ name: 'Ultravibe', via: 'Bill Halsey', viaHadMemberStep: true }],
       }),
     ];
-    // Force them into the same cluster via shared closure on the third act.
+    // Force them into the same union-find group via shared closure on the third
+    // act. With no real edge between them, they're not actually a cluster — they
+    // fall out as singletons rather than floating edgeless in one.
     for (const e of per) e.closure.add('ultravibe');
-    const { clusters } = buildGraph(per);
-    const edge = clusters[0].edges.find(
-      (e) =>
-        (e.a === 'Filteria' && e.b === 'Cosmosis') || (e.a === 'Cosmosis' && e.b === 'Filteria'),
-    );
-    expect(edge).toBeUndefined();
+    const { clusters, singletons } = buildGraph(per);
+    expect(clusters).toHaveLength(0);
+    expect(singletons).toEqual(expect.arrayContaining(['Filteria', 'Cosmosis']));
   });
 
   it('drops entries with no usable name', () => {
@@ -383,6 +382,97 @@ describe('buildGraph', () => {
       { rel: 'member of', with: 'Laughing Buddha' },
       { rel: 'member of', with: 'Ultravibe' },
     ]);
+  });
+
+  describe('obvious same-named-part connections', () => {
+    // Shared identity hosted by the SAME visibly-named part on both sides is a
+    // link the user reads straight off the labels — not a reveal — so it's
+    // dropped. The acts then fall out of the cluster they'd otherwise form.
+    const mk = ({ aliases = [], members = [] } = {}) => ({
+      aliases: aliases.map((n) => ({ name: n })),
+      members: members.map((n) => ({ name: n })),
+      groups: [],
+      relatedProjects: [],
+    });
+    // A combo "X vs Y" whose parts each carry their own merged data; the combo's
+    // own merged is the fusion of its parts, as the real pipeline produces.
+    const combo = (name, partData) => {
+      const parts = Object.keys(partData);
+      const fuse = (k) => parts.flatMap((p) => partData[p][k] ?? []);
+      const fused = mk({ aliases: fuse('aliases'), members: fuse('members') });
+      return {
+        name,
+        merged: fused,
+        closure: new Set([
+          normaliseName(name),
+          ...parts.map(normaliseName),
+          ...[...fused.aliases, ...fused.members].map((e) => normaliseName(e.name)),
+        ]),
+        parts,
+        sources: [
+          { name, merged: fused },
+          ...parts.map((p) => ({ name: p, merged: mk(partData[p]) })),
+        ],
+      };
+    };
+
+    it('does not cluster a solo act with a combo that just contains it as a part', () => {
+      // "Process" (solo) ↔ "Process vs Aether": the only tie is that both ARE
+      // Process (aka the same person on each side).
+      const solo = entry('Process', { aliases: ['Sean Williams'] });
+      const vs = combo('Process vs Aether', {
+        Process: { aliases: ['Sean Williams'] },
+        Aether: {},
+      });
+      const { clusters, singletons } = buildGraph([solo, vs]);
+      expect(clusters).toHaveLength(0);
+      expect(singletons).toEqual(expect.arrayContaining(['Process', 'Process vs Aether']));
+    });
+
+    it('treats a punctuation/spelling variant of the part name as the same act', () => {
+      // "Ree.K" (solo) ↔ "DOMINO vs Ree-K": "Ree.K" and "Ree-K" normalise equal,
+      // so the part is visibly the same act.
+      const solo = entry('Ree.K', { aliases: ['Rie Kurihara'] });
+      const vs = combo('DOMINO vs Ree-K', {
+        DOMINO: {},
+        'Ree-K': { aliases: ['Rie Kurihara'] },
+      });
+      const { clusters, singletons } = buildGraph([solo, vs]);
+      expect(clusters).toHaveLength(0);
+      expect(singletons).toEqual(expect.arrayContaining(['Ree.K', 'DOMINO vs Ree-K']));
+    });
+
+    it('does not cluster two combos that only share a visibly-named part', () => {
+      // "Process vs Aether" ↔ "Process vs Bob": both labels say Process.
+      const a = combo('Process vs Aether', {
+        Process: { aliases: ['Sean Williams'] },
+        Aether: {},
+      });
+      const b = combo('Process vs Bob', {
+        Process: { aliases: ['Sean Williams'] },
+        Bob: {},
+      });
+      const { clusters } = buildGraph([a, b]);
+      expect(clusters).toHaveLength(0);
+    });
+
+    it('keeps a HIDDEN shared member between two combos that also share a part', () => {
+      // Both say Process (obvious, dropped) but also secretly share a member
+      // hosted by *different* parts (Aether vs Bob) — that's the real reveal.
+      const a = combo('Process vs Aether', {
+        Process: { aliases: ['Sean Williams'] },
+        Aether: { members: ['Hidden Person'] },
+      });
+      const b = combo('Process vs Bob', {
+        Process: { aliases: ['Sean Williams'] },
+        Bob: { members: ['Hidden Person'] },
+      });
+      const { clusters } = buildGraph([a, b]);
+      expect(clusters).toHaveLength(1);
+      const persons = clusters[0].edges[0].evidence.map((e) => e.person);
+      expect(persons).toContain('Hidden Person');
+      expect(persons).not.toContain('Sean Williams');
+    });
   });
 
   it('reduces a triangle to a star when the bridge is itself a lineup node', () => {
