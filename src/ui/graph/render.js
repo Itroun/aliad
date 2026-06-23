@@ -16,12 +16,16 @@ const DONE_EPS = 0.4; // px; stop animating once everything is this close
 export function createGraphPane() {
   const root = document.createElement('div');
   root.className = 'graph-pane';
+  // Edges and nodes are both drawn in WORLD coordinates; the pan/zoom viewport
+  // transform lives on the wrapper layers (the <g> and the inner nodes div), so
+  // the renderer never has to know about scale/pan — it just draws world coords.
   root.innerHTML = `
-    <svg class="graph-svg"></svg>
-    <div class="graph-nodes"></div>
+    <svg class="graph-svg"><g class="graph-vp"></g></svg>
+    <div class="graph-nodes"><div class="graph-nodes-vp"></div></div>
   `;
   const svg = root.querySelector('.graph-svg');
-  const nodesLayer = root.querySelector('.graph-nodes');
+  const edgeVp = root.querySelector('.graph-vp');
+  const nodesLayer = root.querySelector('.graph-nodes-vp');
 
   // Track DOM elements by stable key so updates can fade-in new edges.
   const nodeEls = new Map(); // name → HTMLElement
@@ -57,7 +61,7 @@ export function createGraphPane() {
           <g class="edge-ticks"></g>
         `;
         g.addEventListener('click', () => onEdgeClick?.(edge));
-        svg.append(g);
+        edgeVp.append(g);
         edgeEls.set(key, g);
       }
       g.classList.toggle('is-focused', key === focusedEdgeKey);
@@ -190,6 +194,16 @@ export function createGraphPane() {
     rafId = requestAnimationFrame(tick);
   }
 
+  // Apply the pan/zoom viewport transform to both wrapper layers. `animate`
+  // eases the change (used for programmatic fit); omit it for wheel/drag so the
+  // graph tracks the pointer immediately.
+  function setTransform({ k, tx, ty }, animate = false) {
+    edgeVp.setAttribute('transform', `translate(${tx} ${ty}) scale(${k})`);
+    nodesLayer.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`;
+    edgeVp.classList.toggle('is-animating', animate);
+    nodesLayer.classList.toggle('is-animating', animate);
+  }
+
   function clear() {
     if (rafId != null) cancelAnimationFrame(rafId);
     rafId = null;
@@ -202,5 +216,5 @@ export function createGraphPane() {
     targetPos.clear();
   }
 
-  return { el: root, update, clear };
+  return { el: root, update, clear, setTransform };
 }

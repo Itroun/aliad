@@ -5,7 +5,7 @@
 // Node positions persist across calls so warm starts keep the layout stable
 // as new artists arrive.
 
-function stepCluster(nodes, edges, cfg) {
+function stepCluster(nodes, edges, cfg, deg) {
   for (const n of nodes) {
     n.fx = 0;
     n.fy = 0;
@@ -41,10 +41,17 @@ function stepCluster(nodes, edges, cfg) {
     b.fx -= ux * f;
     b.fy -= uy * f;
   }
-  // Weak pull toward local origin so the cluster stays compact around (0,0).
-  for (const n of nodes) {
-    n.fx += -n.x * cfg.kCenter;
-    n.fy += -n.y * cfg.kCenter;
+  // Degree-aware pull toward the local origin. An EDGE-LESS node (its connecting
+  // edges were suppressed by graph reduction) has no spring holding it to the
+  // cluster, so it needs a firm centering pull to stay cohesive. A node WITH
+  // edges is already held by its springs; giving it the same pull is what folds
+  // tails/legs back over the cluster body and creates edge crossings — so it gets
+  // a much weaker pull, letting appendages extend outward instead.
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const kc = deg[i] === 0 ? cfg.kCenterFree : cfg.kCenterTied;
+    n.fx += -n.x * kc;
+    n.fy += -n.y * kc;
   }
   for (const n of nodes) {
     n.vx = (n.vx + n.fx) * cfg.damping;
@@ -54,8 +61,95 @@ function stepCluster(nodes, edges, cfg) {
   }
 }
 
-function clamp(v, lo, hi) {
-  return Math.max(lo, Math.min(hi, v));
+// Count edge-segment crossings in a laid-out cluster. Edges that share an
+// endpoint can't "cross" in the sense we care about, so they're skipped. Used to
+// pick the least-tangled layout among restart attempts.
+function ccw(a, b, c) {
+  return (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x);
+}
+function segmentsCross(p1, p2, p3, p4) {
+  return ccw(p1, p3, p4) !== ccw(p2, p3, p4) && ccw(p1, p2, p3) !== ccw(p1, p2, p4);
+}
+function countCrossings(nodes, edges) {
+  let count = 0;
+  for (let i = 0; i < edges.length; i++) {
+    for (let j = i + 1; j < edges.length; j++) {
+      const [a, b] = edges[i];
+      const [c, d] = edges[j];
+      if (a === c || a === d || b === c || b === d) continue;
+      if (segmentsCross(nodes[a], nodes[b], nodes[c], nodes[d])) count++;
+    }
+  }
+  return count;
+}
+
+// Tiny deterministic PRNG (mulberry32) so restart seedings are reproducible —
+// the same lineup always lays out the same way (stable across reloads + tests).
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// A stable per-cluster orientation in [0, 2π), hashed from the node names. Every
+// cluster is seeded from the same fixed golden-angle ring, so without this every
+// 2-node cluster settles along the *same* line and they all render parallel.
+// Rotating each cluster by its own hashed angle (a rigid transform — shape,
+// distances and crossings are all preserved) spreads the orientations out and
+// lets the de-collision pass nestle them together more tightly. Deterministic, so
+// the layout stays stable across reloads.
+function clusterAngle(names) {
+  let h = 2166136261;
+  for (const name of names) {
+    for (let i = 0; i < name.length; i++) {
+      h ^= name.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+  }
+  return mulberry32(h)() * Math.PI * 2;
+}
+
+const RESTART_ATTEMPTS = 12;
+const RESTART_ITERS = 250;
+
+// Crossing-minimising restarts (mutates `nodes` in place). The warm layout is
+// kept untouched when it's already crossing-free — so a settled cluster never
+// jumps as new acts stream in. Only a tangled cluster is re-seeded: we try a few
+// reproducible random starts, keep the least-crossing one, and never adopt a
+// result worse than the warm layout. Skipped for clusters too small to cross
+// (need ≥2 edges and ≥4 nodes for two non-adjacent edges to exist).
+function relaxCrossings(nodes, edges, cfg, deg, clusterIdx) {
+  if (edges.length < 2 || nodes.length < 4) return;
+  let bestX = countCrossings(nodes, edges);
+  if (bestX === 0) return;
+  let best = nodes.map((n) => ({ x: n.x, y: n.y }));
+  const rng = mulberry32((clusterIdx + 1) * 0x9e3779b1);
+  for (let k = 0; k < RESTART_ATTEMPTS && bestX > 0; k++) {
+    for (const n of nodes) {
+      const a = rng() * Math.PI * 2;
+      const r = 60 * (0.5 + rng());
+      n.x = Math.cos(a) * r;
+      n.y = Math.sin(a) * r;
+      n.vx = 0;
+      n.vy = 0;
+    }
+    for (let it = 0; it < RESTART_ITERS; it++) stepCluster(nodes, edges, cfg, deg);
+    const x = countCrossings(nodes, edges);
+    if (x < bestX) {
+      bestX = x;
+      best = nodes.map((n) => ({ x: n.x, y: n.y }));
+    }
+  }
+  for (let i = 0; i < nodes.length; i++) {
+    nodes[i].x = best[i].x;
+    nodes[i].y = best[i].y;
+    nodes[i].vx = 0;
+    nodes[i].vy = 0;
+  }
 }
 
 // Cluster bounding radius from the dots alone (plus a small pad). Labels are
@@ -133,8 +227,11 @@ function clusterAABB(names, pos, side, margin) {
 // (and whole small clusters) can still overlap. Here we resolve the residual by
 // pushing overlapping cluster boxes apart along their shortest axis, moving each
 // cluster RIGIDLY so the force-laid shapes/angles are untouched. Converges by
-// relaxation; capped iterations keep it cheap and bounded.
-function separateClusters(groups, pos, side, width, height, padding) {
+// relaxation; capped iterations keep it cheap and bounded. Runs in UNBOUNDED
+// world space — clusters spread as far as they need; the pan/zoom viewport
+// (graphScreen + viewport.js) reframes the result, so there is no on-canvas clamp
+// to pin clusters together when the lineup grows.
+function separateClusters(groups, pos, side) {
   const MARGIN = 8;
   for (let it = 0; it < 30; it++) {
     const boxes = groups.map((g) => clusterAABB(g.names, pos, side, MARGIN));
@@ -173,34 +270,24 @@ function separateClusters(groups, pos, side, width, height, padding) {
         p.y += dy;
       }
     }
-    // Keep each cluster on-canvas (shift the whole cluster, never reshape it).
-    for (const g of groups) {
-      let mnx = Infinity;
-      let mny = Infinity;
-      let mxx = -Infinity;
-      let mxy = -Infinity;
-      for (const name of g.names) {
-        const p = pos.get(name);
-        if (p.x < mnx) mnx = p.x;
-        if (p.x > mxx) mxx = p.x;
-        if (p.y < mny) mny = p.y;
-        if (p.y > mxy) mxy = p.y;
-      }
-      let sx = 0;
-      let sy = 0;
-      if (mnx < padding) sx = padding - mnx;
-      else if (mxx > width - padding) sx = width - padding - mxx;
-      if (mny < padding) sy = padding - mny;
-      else if (mxy > height - padding) sy = height - padding - mxy;
-      if (sx || sy) {
-        for (const name of g.names) {
-          const p = pos.get(name);
-          p.x += sx;
-          p.y += sy;
-        }
-      }
-    }
   }
+}
+
+// World-space AABB union across all clusters (label footprints included), used by
+// the viewport to fit/centre the whole graph. Empty input yields null.
+function contentBounds(groups, pos, side) {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const g of groups) {
+    const b = clusterAABB(g.names, pos, side, 0);
+    if (b.x0 < x0) x0 = b.x0;
+    if (b.y0 < y0) y0 = b.y0;
+    if (b.x1 > x1) x1 = b.x1;
+    if (b.y1 > y1) y1 = b.y1;
+  }
+  return Number.isFinite(x0) ? { x0, y0, x1, y1 } : null;
 }
 
 // Greedy circle packing: place the largest cluster at the canvas centre, then
@@ -245,7 +332,7 @@ function packClusters(circles, width, height, gap) {
   return byId;
 }
 
-export function createLayout({ width, height, padding = 80 }) {
+export function createLayout({ width, height }) {
   // Local positions, stored in cluster-local coords (relative to cluster centre).
   const localPositions = new Map(); // name → { x, y, vx, vy }
 
@@ -263,18 +350,17 @@ export function createLayout({ width, height, padding = 80 }) {
 
   function compute({ clusters = [] }, iterations = 200) {
     const cfg = {
-      // Repulsion is raised (vs the original 12000) and centering lowered (vs
-      // 0.02) so an appendage — a "leg" of nodes off one triangle vertex — is
-      // pushed OUTWARD rather than folded back over the body by the centering
-      // pull. But not too far: an earlier pass (kRep 20000 / kCenter 0.006) left
-      // small clusters very flat/spread, so these are dialled back to a middle
-      // ground. kCenter stays small-but-nonzero because some edges are suppressed
-      // (triangle reduction, redundant bridges), making it the only force keeping
-      // an edge-less node cohesive with its cluster.
+      // Repulsion is raised (vs the original 12000) so an appendage — a "leg" of
+      // nodes off one triangle vertex — is pushed OUTWARD rather than folded back
+      // over the body. Centering is now degree-aware (see stepCluster): edge-less
+      // nodes get a firm pull to stay attached, edged nodes a near-zero one so
+      // tails extend freely. The residual folding that survives the force sim is
+      // mopped up by the crossing-minimising restarts below.
       kRep: 13000,
       kSpring: 0.045,
       restLen: 138,
-      kCenter: 0.013,
+      kCenterFree: 0.05, // edge-less nodes: hold them to the cluster
+      kCenterTied: 0.002, // edged nodes: barely centre, let legs unfold
       damping: 0.82,
     };
 
@@ -290,7 +376,20 @@ export function createLayout({ width, height, padding = 80 }) {
       const edgeIdx = edges
         .map(({ a, b }) => [names.indexOf(a), names.indexOf(b)])
         .filter(([i, j]) => i >= 0 && j >= 0);
-      for (let it = 0; it < iterations; it++) stepCluster(nodeList, edgeIdx, cfg);
+      const deg = nodeList.map(() => 0);
+      for (const [i, j] of edgeIdx) {
+        deg[i]++;
+        deg[j]++;
+      }
+      for (let it = 0; it < iterations; it++) stepCluster(nodeList, edgeIdx, cfg, deg);
+
+      // Untangle: the force sim can settle a planar cluster into a folded local
+      // minimum with crossing edges (even a simple path can). Warm layouts that
+      // are already crossing-free are kept as-is (so streaming stays calm); only
+      // a tangled cluster is re-seeded — we try a few reproducible random starts
+      // and adopt the least-crossing result, never worse than the warm layout.
+      relaxCrossings(nodeList, edgeIdx, cfg, deg, ci);
+
       // Re-centre cluster on its centroid so packing is symmetric.
       let mx = 0;
       let my = 0;
@@ -315,30 +414,26 @@ export function createLayout({ width, height, padding = 80 }) {
     // per-cluster radius inflation that pushed clusters to the canvas edges.
     const packed = packClusters(clusterInfos, width, height, 72);
 
-    // Convert to absolute positions. Clamp the whole cluster by its CENTRE (so it
-    // stays on-canvas) rather than clamping each node — per-node clamping pinned
-    // both nodes of an edge cluster to the same margin coordinate, flattening it
-    // into a straight horizontal/vertical line. Centre-clamping preserves the
-    // cluster's shape and angle. The min/max guards keep the range valid when a
-    // cluster is larger than the canvas (falls back to the canvas centre).
+    // Convert to absolute WORLD positions from the packed cluster centres. No
+    // viewport clamp here — the layout lives in unbounded world space and the
+    // pan/zoom viewport (graphScreen + viewport.js) fits it into the pane. The
+    // packed centres are seeded around the pane size only as a starting spread.
     const pos = new Map();
     const groups = [];
     for (const info of clusterInfos) {
       const centre = packed.get(info.id);
-      const r = info.r;
-      const cx = clamp(
-        centre.x,
-        Math.min(r + padding, width / 2),
-        Math.max(width - r - padding, width / 2),
-      );
-      const cy = clamp(
-        centre.y,
-        Math.min(r + padding, height / 2),
-        Math.max(height - r - padding, height / 2),
-      );
+      // Rotate the cluster by its own hashed angle so orientations vary. Applied
+      // to a COPY (localPositions stay un-rotated) so the rotation isn't compounded
+      // on the next warm-started recompute.
+      const theta = clusterAngle(info.names);
+      const cos = Math.cos(theta);
+      const sin = Math.sin(theta);
       for (const name of info.names) {
         const p = localPositions.get(name);
-        pos.set(name, { x: cx + p.x, y: cy + p.y });
+        pos.set(name, {
+          x: centre.x + p.x * cos - p.y * sin,
+          y: centre.y + p.x * sin + p.y * cos,
+        });
       }
       groups.push({ id: info.id, names: info.names });
     }
@@ -346,22 +441,19 @@ export function createLayout({ width, height, padding = 80 }) {
     // Decide label sides once, then nudge any clusters whose labels/dots still
     // overlap apart (the circle packing only separated dots, not labels).
     const side = computeLabelSides(groups, allEdges, pos, width);
-    separateClusters(groups, pos, side, width, height, padding);
+    separateClusters(groups, pos, side);
 
-    // Emit positions + the label side (with a final on-canvas guard so a label
-    // near the edge flips inward instead of clipping).
-    const out = new Map();
+    // Emit world positions + the label side. Label-side choice is final here
+    // (no canvas-edge flip): clusters are no longer pinned to the pane, so a
+    // label can't clip against a fixed edge — the viewport reframes everything.
+    const positions = new Map();
     for (const g of groups) {
       for (const name of g.names) {
         const p = pos.get(name);
-        let labelLeft = side.get(name);
-        const w = estLabelW(name);
-        if (labelLeft && p.x - w < 4) labelLeft = false;
-        else if (!labelLeft && p.x + w > width - 4) labelLeft = true;
-        out.set(name, { x: p.x, y: p.y, labelLeft });
+        positions.set(name, { x: p.x, y: p.y, labelLeft: side.get(name) });
       }
     }
-    return out;
+    return { positions, bounds: contentBounds(groups, pos, side) };
   }
 
   function resize(dims) {

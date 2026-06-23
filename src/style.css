@@ -528,6 +528,11 @@ body > #app {
 .graph-pane {
   position: absolute;
   inset: 0;
+  cursor: grab;
+}
+
+.graph-pane.is-panning {
+  cursor: grabbing;
 }
 
 .graph-svg {
@@ -539,6 +544,52 @@ body > #app {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+/* Pan/zoom viewport wrappers. Both layers carry the same world→screen transform
+   (set imperatively in render.js); `is-animating` eases programmatic fit changes
+   while wheel/drag stay immediate. */
+.graph-nodes-vp {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.graph-vp,
+.graph-nodes-vp {
+  transition: none;
+}
+
+.graph-vp.is-animating,
+.graph-nodes-vp.is-animating {
+  transition: transform 0.4s ease;
+}
+
+.graph-fit-btn {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 4;
+  padding: 6px 12px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition:
+    opacity 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.graph-fit-btn:hover {
+  opacity: 1;
+  border-color: var(--accent);
 }
 
 /* ── Graph nodes ─────────────────────────────────────────────────── */
@@ -589,12 +640,19 @@ body > #app {
   cursor: pointer;
 }
 
+/* Non-scaling stroke keeps lines a crisp 1px and the hit-band a constant screen
+   width at any zoom level (the viewport <g> scales geometry, not these strokes). */
 .edge-line {
   stroke: var(--line-strong);
   stroke-width: 1;
+  vector-effect: non-scaling-stroke;
   transition:
     stroke 0.2s ease,
     stroke-width 0.2s ease;
+}
+
+.edge-hit {
+  vector-effect: non-scaling-stroke;
 }
 
 .edge-tick {

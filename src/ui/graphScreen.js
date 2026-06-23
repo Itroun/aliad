@@ -2,6 +2,7 @@ import { buildGraph } from '../core/graph.js';
 import { diffGraph } from './graph/eventStream.js';
 import { createLayout } from './graph/layout.js';
 import { createGraphPane } from './graph/render.js';
+import { computeFitTransform, zoomAtPoint } from './graph/viewport.js';
 import { createFocusPanel } from './graph/focusPanel.js';
 import { createViewTabs } from './viewTabs.js';
 
@@ -51,6 +52,13 @@ export function createGraphScreen({ lineup, onViewChange }) {
   const pane = createGraphPane();
   graphRegion.append(pane.el);
 
+  const fitBtn = document.createElement('button');
+  fitBtn.className = 'graph-fit-btn';
+  fitBtn.type = 'button';
+  fitBtn.title = 'Fit graph to view';
+  fitBtn.textContent = 'Fit';
+  graphRegion.append(fitBtn);
+
   const focusPanel = createFocusPanel();
   panelHost.append(focusPanel.el);
 
@@ -86,6 +94,25 @@ export function createGraphScreen({ lineup, onViewChange }) {
   // Latest computed positions, reused by focus-only re-renders so a click never
   // re-runs the force sim.
   let lastPositions = new Map();
+  let lastBounds = null;
+
+  // ── Pan/zoom viewport ──────────────────────────────────────────────
+  // World→screen transform. `autoFit` keeps the whole graph framed as new acts
+  // stream in; the first manual zoom/pan turns it off (so we don't yank the
+  // user's view), and the Fit button turns it back on.
+  let viewport = { k: 1, tx: 0, ty: 0 };
+  let autoFit = true;
+
+  function applyViewport(animate) {
+    pane.setTransform(viewport, animate);
+  }
+
+  function fitToContent(animate) {
+    if (!lastBounds) return;
+    const { width, height } = paneDims();
+    viewport = computeFitTransform(lastBounds, width, height);
+    applyViewport(animate);
+  }
 
   // Re-render with the CURRENT positions (no layout recompute). Used for focus
   // changes (edge clicks): the sim is warm-started and not at equilibrium, so
@@ -121,11 +148,19 @@ export function createGraphScreen({ lineup, onViewChange }) {
     layout.resize({ width, height });
 
     const clusterNames = [...clusterMembers()];
-    lastPositions =
-      clusterNames.length > 0
-        ? layout.compute({ clusters: currentGraph.clusters }, firstLayoutRun ? 250 : 70)
-        : new Map();
+    if (clusterNames.length > 0) {
+      const result = layout.compute({ clusters: currentGraph.clusters }, firstLayoutRun ? 250 : 70);
+      lastPositions = result.positions;
+      lastBounds = result.bounds;
+    } else {
+      lastPositions = new Map();
+      lastBounds = null;
+    }
     firstLayoutRun = false;
+
+    // Keep the whole graph framed as it grows — until the user takes manual
+    // control of the viewport (then we leave their pan/zoom alone).
+    if (autoFit) fitToContent(true);
 
     render();
   }
@@ -186,6 +221,61 @@ export function createGraphScreen({ lineup, onViewChange }) {
       resizeScheduled = false;
       recomputeLayoutAndRender();
     });
+  });
+
+  // ── Pan/zoom interaction ───────────────────────────────────────────
+  // Pointer position relative to the pane's top-left (= screen coords the
+  // viewport transform is expressed in).
+  function panePoint(e) {
+    const r = pane.el.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  pane.el.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      const { x, y } = panePoint(e);
+      // Trackpads/mice report wildly different deltas; map sign to a gentle step.
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      viewport = zoomAtPoint(viewport, x, y, factor);
+      autoFit = false;
+      applyViewport(false);
+    },
+    { passive: false },
+  );
+
+  // Drag the empty canvas to pan. Starting on an edge is left to the edge's own
+  // click handler, so panning never steals an edge click.
+  let panFrom = null;
+  pane.el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('.graph-edge')) return;
+    panFrom = { x: e.clientX, y: e.clientY, tx: viewport.tx, ty: viewport.ty };
+    pane.el.classList.add('is-panning');
+    pane.el.setPointerCapture(e.pointerId);
+  });
+  pane.el.addEventListener('pointermove', (e) => {
+    if (!panFrom) return;
+    viewport = {
+      ...viewport,
+      tx: panFrom.tx + (e.clientX - panFrom.x),
+      ty: panFrom.ty + (e.clientY - panFrom.y),
+    };
+    autoFit = false;
+    applyViewport(false);
+  });
+  const endPan = (e) => {
+    if (!panFrom) return;
+    panFrom = null;
+    pane.el.classList.remove('is-panning');
+    pane.el.releasePointerCapture?.(e.pointerId);
+  };
+  pane.el.addEventListener('pointerup', endPan);
+  pane.el.addEventListener('pointercancel', endPan);
+
+  fitBtn.addEventListener('click', () => {
+    autoFit = true;
+    fitToContent(true);
   });
 
   // ── Callbacks for lookupAll ────────────────────────────────────────
