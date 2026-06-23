@@ -260,6 +260,29 @@ describe('buildGraph', () => {
     ]);
   });
 
+  it('drops via-mediated side-project bridges when the two nodes are directly linked', () => {
+    // Max is a member of Tecnica (direct, non-via link). Tecnica's *other*
+    // member (Maurizio) is also in Pleiadians/Etnica, so those surface on
+    // Tecnica's side via a member step ("side project of Tecnica") while Max
+    // is in them directly. The direct "Max member of Tecnica" row already
+    // explains the edge; the via-mediated band rows are redundant noise.
+    const per = [
+      entry('Max Lanfranconi', {
+        groups: ['Pleiadians', 'Etnica', 'Tecnica'],
+      }),
+      entry('Tecnica', {
+        members: ['Max Lanfranconi', 'Maurizio'],
+        groups: [
+          { name: 'Pleiadians', via: 'Maurizio', viaHadMemberStep: true },
+          { name: 'Etnica', via: 'Maurizio', viaHadMemberStep: true },
+        ],
+      }),
+    ];
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges[0];
+    expect(edge.evidence.map((e) => e.person).sort()).toEqual(['Max Lanfranconi', 'Tecnica']);
+  });
+
   it('drops direct aka rows when a person-bridge already explains the edge', () => {
     // Etnica and Pleiadians are listed as aliases of each other AND share
     // four members. The shared-members rows are the informative explanation;

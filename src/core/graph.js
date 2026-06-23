@@ -236,6 +236,16 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
     if (!seenPersons.has(aKey)) pushDirect(B.name, aKey, A.name, aRels, bRels);
   }
 
+  // A direct (non-via) identity row between the two nodes — e.g. Max is a member
+  // of Tecnica — is the cleanest possible connection. Like a person-bridge, it
+  // makes via-mediated bridge rows redundant noise: those rows reach a shared
+  // band through someone *else* inside one of the nodes (here Tecnica's other
+  // member), restating membership the direct row already establishes. We gate on
+  // a direct row having actually been EMITTED above (a non-via pushDirect pushes
+  // under aKey/bKey) rather than merely existing, so this can never strip an
+  // edge's only evidence and split a cluster.
+  const hasDirectRow = seenPersons.has(aKey) || seenPersons.has(bKey);
+
   // Bridge identities present in both A and B's merged buckets.
   for (const [key, aEntry] of aRels) {
     if (key === aKey || key === bKey) continue;
@@ -245,7 +255,7 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
     if (isOtherNode(key)) continue;
     const bEntry = bRels.get(key);
     if (!bEntry) continue;
-    if ((aEntry.viaKey || bEntry.viaKey) && hasPersonBridge) continue;
+    if ((aEntry.viaKey || bEntry.viaKey) && (hasPersonBridge || hasDirectRow)) continue;
     // Drop weak via-via bridges where each side reached the shared name
     // through a different person — that's two acts both connected to a third
     // act, not actually connected to each other.
