@@ -28,31 +28,32 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   const root = document.createElement('div');
   root.className = 'screen screen-input';
 
+  // Dev-only quick-fill. A polished prod version is a future TODO.
+  const showExample = import.meta.env.MODE !== 'production';
+
   root.innerHTML = `
     <div class="grid-bg"></div>
     <header class="topbar">
       <div class="wordmark">
-        <span class="wordmark-logo">aka</span>
+        <span class="wordmark-logo">aliad</span>
         <span class="wordmark-tagline">Lineup identity graph</span>
       </div>
       <div class="topbar-tabs"></div>
     </header>
     <main class="input-main">
       <div class="input-hero">
-        <div class="eyebrow"><span class="eyebrow-num">01</span><span>Drop in a lineup</span></div>
-        <h1 class="input-title">Who&rsquo;s actually<br/>on the bill?</h1>
+        <h1 class="input-title">Who&rsquo;s performing?</h1>
         <p class="input-lede">
           Paste a festival lineup or link one from the web.
-          <span class="lede-accent"> aka </span>
-          finds the other names each act performs under &mdash;
-          the side projects, the aliases, the shared members.
+          <span class="lede-accent"> aliad </span>
+          finds the other names each act performs under, so you can see who&rsquo;s playing more than once.
         </p>
       </div>
 
       <label class="field field-textarea">
         <div class="field-labelrow">
           <span class="field-label">Paste lineup</span>
-          <button type="button" class="link-btn example-btn">Try an example &darr;</button>
+          ${showExample ? '<button type="button" class="link-btn example-btn">Try an example &darr;</button>' : ''}
         </div>
         <textarea class="lineup-input"
           rows="10"
@@ -84,7 +85,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
 
       <div class="input-footer">
         <span>Works with plain text &middot; HTML &middot; URLs</span>
-        <span>aka / v0.1</span>
+        <span>aliad / v0.1</span>
       </div>
     </main>
   `;
@@ -214,7 +215,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
 
   urlAdd.addEventListener('click', () => addUrlRow(true));
 
-  exampleBtn.addEventListener('click', () => {
+  exampleBtn?.addEventListener('click', () => {
     textarea.value = EXAMPLE_LINEUP;
     resetUrlRows();
     clearPasteState();
