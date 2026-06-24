@@ -1,4 +1,4 @@
-# aka
+# aliad
 
 Paste a festival lineup, get every artist's aliases, side projects, and group
 memberships. Built for when you're scanning a 200-name poster and want to know
@@ -47,7 +47,7 @@ npx wrangler dev                    # full stack on http://localhost:8787
 ```
 
 First run only, create the local cache database:
-`npx wrangler d1 migrations apply aka-graph --local`. Rebuild after code changes
+`npx wrangler d1 migrations apply aliad-graph --local`. Rebuild after code changes
 when running the wrangler stack. See ARCHITECTURE.md for the bindings and
 deploy-time setup.
 

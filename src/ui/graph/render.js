@@ -54,7 +54,7 @@ export function createGraphPane() {
       let g = edgeEls.get(key);
       if (!g) {
         g = document.createElementNS(SVG_NS, 'g');
-        g.classList.add('graph-edge', 'aka-fadein');
+        g.classList.add('graph-edge', 'aliad-fadein');
         g.innerHTML = `
           <line class="edge-hit" stroke="transparent" stroke-width="18"></line>
           <line class="edge-line" stroke-linecap="round"></line>

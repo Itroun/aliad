@@ -12,9 +12,9 @@ describe('parseAllowedOrigins', () => {
   });
 
   it('splits a comma list and normalises each to a bare origin', () => {
-    expect(parseAllowedOrigins('https://aka.example , https://aka.pages.dev/')).toEqual([
+    expect(parseAllowedOrigins('https://aka.example , https://aliad.app/')).toEqual([
       'https://aka.example',
-      'https://aka.pages.dev',
+      'https://aliad.app',
     ]);
   });
 
@@ -68,8 +68,8 @@ describe('checkOrigin', () => {
   });
 
   it('allows any origin in a multi-value allowlist (prod + preview)', () => {
-    const env = { ALLOWED_ORIGIN: 'https://aka.example,https://aka.pages.dev' };
-    expect(checkOrigin(req({ Origin: 'https://aka.pages.dev' }), env).allowed).toBe(true);
+    const env = { ALLOWED_ORIGIN: 'https://aka.example,https://aliad.app' };
+    expect(checkOrigin(req({ Origin: 'https://aliad.app' }), env).allowed).toBe(true);
   });
 
   it('rejects a non-allowlisted origin', () => {

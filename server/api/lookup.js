@@ -27,7 +27,7 @@ import * as discogs from '../../src/providers/discogs.map.js';
 
 // MB wants a descriptive UA; the browser forbids setting it, which is one reason
 // these calls are proxied server-side (see CLAUDE.md rate-limits note).
-const USER_AGENT = 'aka/0.1 (+https://alsoknownas.music)';
+const USER_AGENT = 'aliad/0.1 (+https://aliad.app)';
 
 const DAY = 24 * 3600;
 // Freshness windows mirror the L1 browser cache: aliases/members/groups are

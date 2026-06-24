@@ -57,7 +57,7 @@ export function createFocusPanel() {
         <svg class="toggle-caret" width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M1 0l6 4-6 4z"/></svg>
         <span>${count} ${label}</span>
       </button>
-      <div class="connection-evidence aka-fadein ${expanded ? 'is-open' : ''}">${ev}</div>
+      <div class="connection-evidence aliad-fadein ${expanded ? 'is-open' : ''}">${ev}</div>
     `;
 
     body.querySelector('.connection-toggle').addEventListener('click', () => {

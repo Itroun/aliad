@@ -7,7 +7,7 @@ export function createEmptyGraphScreen({ onViewChange } = {}) {
     <div class="grid-bg"></div>
     <header class="topbar">
       <div class="wordmark">
-        <span class="wordmark-logo">aka</span>
+        <span class="wordmark-logo">aliad</span>
         <span class="wordmark-tagline">Lineup identity graph</span>
       </div>
       <div class="topbar-tabs"></div>

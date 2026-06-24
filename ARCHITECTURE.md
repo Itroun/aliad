@@ -1,6 +1,6 @@
 # Architecture
 
-A snapshot of how **aka** is built today, after the cache + graph rewrite. For the
+A snapshot of how **aliad** is built today, after the cache + graph rewrite. For the
 product pitch and quick-start, see [README.md](./README.md). For _how it got
 here_ — the staged migration from a browser-side recursive walk to a server-side
 graph query — see git history; this file describes the destination, not the
