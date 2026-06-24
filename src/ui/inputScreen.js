@@ -36,7 +36,6 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
     <header class="topbar">
       <div class="wordmark">
         <span class="wordmark-logo">aliad</span>
-        <span class="wordmark-tagline">Lineup identity graph</span>
       </div>
       <div class="topbar-tabs"></div>
     </header>
@@ -52,12 +51,12 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
 
       <label class="field field-textarea">
         <div class="field-labelrow">
-          <span class="field-label">Paste lineup</span>
+          <span class="field-label">Paste a lineup</span>
           ${showExample ? '<button type="button" class="link-btn example-btn">Try an example &darr;</button>' : ''}
         </div>
         <textarea class="lineup-input"
           rows="10"
-          placeholder="One act per line, or paste the raw HTML&#10;from the festival website. We&rsquo;ll figure it out."
+          placeholder="One act per line."
         ></textarea>
       </label>
 
@@ -70,22 +69,21 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
       <div class="field field-url">
         <div class="field-labelrow">
           <span class="field-label">Link to a lineup</span>
-          <span class="field-hint">One per stage &middot; we merge them</span>
         </div>
         <div class="url-list"></div>
-        <button type="button" class="link-btn url-add">+ Add another URL</button>
+        <button type="button" class="link-btn url-add">+ Add another URL (merged together)</button>
       </div>
 
       <div class="decode-row">
         <button type="button" class="decode-btn" disabled>
-          <span>Decode lineup</span><span class="decode-arrow">&rarr;</span>
+          <span>Map lineup</span><span class="decode-arrow">&rarr;</span>
         </button>
         <span class="decode-counter"></span>
       </div>
 
       <div class="input-footer">
-        <span>Works with plain text &middot; HTML &middot; URLs</span>
-        <span>aliad / v0.1</span>
+        <!-- TODO(deploy): point href at the real Aliad repo. -->
+        <a href="https://github.com/example/aliad" target="_blank" rel="noopener noreferrer">aliad</a>
       </div>
     </main>
   `;
@@ -135,13 +133,23 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
     urlAdd.hidden = rows.length >= MAX_URLS;
   }
 
+  // Stage-themed example URLs so successive rows hint that one page per stage
+  // is fine. Falls back to the last entry once we run past the named stages.
+  const URL_PLACEHOLDERS = [
+    'https://festival.example/mainstage-lineup',
+    'https://festival.example/sidestage-lineup',
+    'https://festival.example/tent-lineup',
+  ];
+
   function addUrlRow(focus = false) {
     if (urlList.querySelectorAll('.url-wrap').length >= MAX_URLS) return;
+    const index = urlList.querySelectorAll('.url-wrap').length;
+    const placeholder = URL_PLACEHOLDERS[Math.min(index, URL_PLACEHOLDERS.length - 1)];
     const row = document.createElement('div');
     row.className = 'url-wrap';
     row.innerHTML = `
       <span class="url-prefix">&#x2197;</span>
-      <input type="text" class="url-input" placeholder="https://festival.example/lineup" />
+      <input type="text" class="url-input" placeholder="${placeholder}" />
       <button type="button" class="url-remove" aria-label="Remove URL">&times;</button>
     `;
     row.querySelector('.url-input').addEventListener('input', onUrlInput);

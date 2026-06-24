@@ -318,10 +318,22 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
   return { a: A.name, b: B.name, evidence: collapsed };
 }
 
+// Each lineup act is one of three entity kinds, surfaced as a node style in the
+// map view. A combo ("X vs Y") split into parts is a collaboration; an act that
+// MusicBrainz lists members for is a band/group; anything else is a solo person.
+export function nodeKind(entry) {
+  if ((entry?.parts?.length ?? 0) >= 2) return 'collab';
+  if ((entry?.merged?.members?.length ?? 0) > 0) return 'group';
+  return 'person';
+}
+
 export function buildGraph(perArtistResults) {
   const entries = (perArtistResults ?? []).filter((r) => normaliseName(r?.name));
   const n = entries.length;
-  if (n === 0) return { clusters: [], singletons: [] };
+  if (n === 0) return { clusters: [], singletons: [], kinds: new Map() };
+
+  // name → entity kind, used by the renderer + singleton list to style nodes.
+  const kinds = new Map(entries.map((e) => [e.name, nodeKind(e)]));
 
   const keyToIndex = new Map();
   entries.forEach((r, i) => {
@@ -428,5 +440,5 @@ export function buildGraph(perArtistResults) {
     });
   }
 
-  return { clusters, singletons };
+  return { clusters, singletons, kinds };
 }

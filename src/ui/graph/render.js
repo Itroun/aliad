@@ -41,7 +41,7 @@ export function createGraphPane() {
     return `${a}||${b}`;
   }
 
-  function update({ width, height, nodes, edges, positions, focusedEdgeKey, onEdgeClick }) {
+  function update({ width, height, nodes, edges, positions, kinds, focusedEdgeKey, onEdgeClick }) {
     svg.setAttribute('width', width);
     svg.setAttribute('height', height);
 
@@ -97,6 +97,11 @@ export function createGraphPane() {
         renderedPos.set(name, { x: pos.x, y: pos.y });
       }
       targetPos.set(name, { x: pos.x, y: pos.y });
+      // Entity-kind style (person / group / collab) — drives the dot shape.
+      const kind = kinds?.get(name) || 'person';
+      el.classList.toggle('node-kind-person', kind === 'person');
+      el.classList.toggle('node-kind-group', kind === 'group');
+      el.classList.toggle('node-kind-collab', kind === 'collab');
       const label = el.querySelector('.node-label');
       label.textContent = name;
       // `align-left` puts the label to the LEFT of the dot. The side (edge-aware,

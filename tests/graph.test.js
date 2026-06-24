@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildGraph } from '../src/core/graph.js';
+import { buildGraph, nodeKind } from '../src/core/graph.js';
 import { normaliseName } from '../src/core/merge.js';
 
 function entry(name, { aliases = [], members = [], groups = [], relatedProjects = [] } = {}) {
@@ -21,9 +21,29 @@ function entry(name, { aliases = [], members = [], groups = [], relatedProjects 
   return { name, merged, closure };
 }
 
+describe('nodeKind', () => {
+  it('classifies a split collab ("X vs Y") as collab', () => {
+    expect(nodeKind({ parts: ['X', 'Y'], merged: { members: [{ name: 'A' }] } })).toBe('collab');
+  });
+
+  it('classifies an act with members as a group', () => {
+    expect(nodeKind(entry('Band', { members: ['A', 'B'] }))).toBe('group');
+  });
+
+  it('classifies a memberless solo act as a person', () => {
+    expect(nodeKind(entry('Solo', { groups: ['Some Band'] }))).toBe('person');
+  });
+
+  it('exposes a name → kind map from buildGraph', () => {
+    const { kinds } = buildGraph([entry('Band', { members: ['A'] }), entry('Solo')]);
+    expect(kinds.get('Band')).toBe('group');
+    expect(kinds.get('Solo')).toBe('person');
+  });
+});
+
 describe('buildGraph', () => {
   it('returns empty structure for empty input', () => {
-    expect(buildGraph([])).toEqual({ clusters: [], singletons: [] });
+    expect(buildGraph([])).toEqual({ clusters: [], singletons: [], kinds: new Map() });
   });
 
   it('puts isolated entries in singletons as plain strings', () => {

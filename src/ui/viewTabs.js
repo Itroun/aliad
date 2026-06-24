@@ -3,7 +3,7 @@ export function createViewTabs({ onChange } = {}) {
   el.className = 'view-tabs';
   el.innerHTML = `
     <button type="button" class="view-tab" data-view="input">Lineup</button>
-    <button type="button" class="view-tab" data-view="graph">Connections</button>
+    <button type="button" class="view-tab" data-view="graph">Map</button>
   `;
 
   const buttons = [...el.querySelectorAll('.view-tab')];

@@ -14,7 +14,6 @@ export function createGraphScreen({ lineup, onViewChange }) {
     <header class="topbar">
       <div class="wordmark">
         <span class="wordmark-logo">aliad</span>
-        <span class="wordmark-tagline">Lineup identity graph</span>
       </div>
       <div class="topbar-tabs"></div>
       <div class="topbar-center">
@@ -31,9 +30,12 @@ export function createGraphScreen({ lineup, onViewChange }) {
     <section class="graph-region"></section>
     <aside class="detail-region">
       <div class="panel-host-connection"></div>
-      <div class="panel-section panel-singletons">
-        <div class="panel-eyebrow">No matches</div>
-        <div class="singleton-list"></div>
+      <div class="panel-section panel-singletons" hidden>
+        <button type="button" class="panel-eyebrow singletons-toggle" aria-expanded="false">
+          <span class="singletons-chevron">&#x25B8;</span>
+          <span class="singletons-label"></span>
+        </button>
+        <div class="singleton-list" hidden></div>
       </div>
     </aside>
   `;
@@ -41,6 +43,9 @@ export function createGraphScreen({ lineup, onViewChange }) {
   const graphRegion = root.querySelector('.graph-region');
   const panelHost = root.querySelector('.panel-host-connection');
   const singletonListEl = root.querySelector('.singleton-list');
+  const singletonSection = root.querySelector('.panel-singletons');
+  const singletonToggle = root.querySelector('.singletons-toggle');
+  const singletonLabel = root.querySelector('.singletons-label');
   const progressCounter = root.querySelector('.progress-counter');
   const progressFill = root.querySelector('.progress-fill');
   const resolvingIndicator = root.querySelector('.resolving-indicator');
@@ -62,11 +67,19 @@ export function createGraphScreen({ lineup, onViewChange }) {
   const focusPanel = createFocusPanel();
   panelHost.append(focusPanel.el);
 
+  // The unconnected-acts list is collapsed by default — it's a long, low-value
+  // list that otherwise crowds the panel. Clicking the header expands it.
+  singletonToggle.addEventListener('click', () => {
+    const expanded = singletonToggle.getAttribute('aria-expanded') === 'true';
+    singletonToggle.setAttribute('aria-expanded', String(!expanded));
+    singletonListEl.hidden = expanded;
+  });
+
   // ── State ──────────────────────────────────────────────────────────
   const completedResults = []; // [{ name, merged, closure, sources, parts }]
   const completedNames = new Set(); // lineup names that finished lookup
-  let prevGraph = { clusters: [], singletons: [] };
-  let currentGraph = { clusters: [], singletons: [] };
+  let prevGraph = { clusters: [], singletons: [], kinds: new Map() };
+  let currentGraph = { clusters: [], singletons: [], kinds: new Map() };
   let manualFocusKey = null;
   let autoFocusKey = null;
   let finalized = false;
@@ -131,6 +144,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
       nodes: clusterNames,
       edges,
       positions: lastPositions,
+      kinds: currentGraph.kinds,
       focusedEdgeKey: focusedKey,
       onEdgeClick: (edge) => {
         manualFocusKey = edgeKey(edge);
@@ -168,19 +182,23 @@ export function createGraphScreen({ lineup, onViewChange }) {
   function renderSingletons() {
     const clustered = clusterMembers();
     singletonListEl.replaceChildren();
+    let count = 0;
     lineup.forEach((name, i) => {
       if (clustered.has(name)) return;
+      count++;
       const resolved = completedNames.has(name);
       const row = document.createElement('div');
       row.className = `singleton-row${resolved ? ' is-resolved' : ''}`;
       row.innerHTML = `
-        <span class="singleton-idx">${String(i + 1).padStart(2, '0')}</span>
         <span class="singleton-dot"></span>
         <span class="singleton-name"></span>
       `;
       row.querySelector('.singleton-name').textContent = name;
       singletonListEl.append(row);
     });
+    // Hide the whole section when everything's connected; otherwise show the count.
+    singletonSection.hidden = count === 0;
+    singletonLabel.textContent = `No connections found for ${count} act${count === 1 ? '' : 's'}`;
   }
 
   function updateProgress() {
