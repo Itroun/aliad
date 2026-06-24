@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "build:dev": "vite build --mode development",
+    "dev:local": "bash scripts/dev.sh",
+    "preview:prod": "vite build && wrangler dev",
     "start": "wrangler dev",
     "preview": "vite preview",
     "test": "vitest run",
