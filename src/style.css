@@ -484,31 +484,6 @@ body > #app {
   gap: 10px;
 }
 
-.resolving-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.resolving-indicator.is-hidden {
-  visibility: hidden;
-}
-
-.resolving-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent);
-  animation: aliad-pulse 1.2s ease-in-out infinite;
-}
-
-.resolving-label {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--fg-dim);
-}
-
 .topbar-right {
   display: flex;
   align-items: center;
@@ -529,6 +504,7 @@ body > #app {
   height: 2px;
   background: var(--line);
   position: relative;
+  overflow: hidden;
 }
 
 .progress-fill {
@@ -539,6 +515,50 @@ body > #app {
   width: 0%;
   background: var(--accent);
   transition: width 0.3s ease;
+}
+
+/* "Alive" sheen sweeping across the bar while the walk streams — decoupled from
+   the fill so it stays visible even when the honest % barely moves (cold runs). */
+.progress-bar.is-resolving::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: progress-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-shimmer {
+  from {
+    transform: translateX(-150%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+
+/* Plain-language slow-run reassurance, faded in over the top of the graph. */
+.progress-hint {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  padding: 7px 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+.progress-hint.is-visible {
+  opacity: 1;
 }
 
 .graph-region {
@@ -1001,18 +1021,6 @@ body > #app {
 @keyframes aliad-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@keyframes aliad-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.55;
-    transform: scale(0.85);
   }
 }
 

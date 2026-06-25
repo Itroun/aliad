@@ -16,12 +16,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
         <span class="wordmark-logo">aliad</span>
       </div>
       <div class="topbar-tabs"></div>
-      <div class="topbar-center">
-        <span class="resolving-indicator">
-          <span class="resolving-dot"></span>
-          <span class="resolving-label">Resolving…</span>
-        </span>
-      </div>
+      <div class="topbar-center"></div>
       <div class="topbar-right">
         <span class="progress-counter">000%</span>
         <div class="progress-bar"><div class="progress-fill"></div></div>
@@ -48,7 +43,10 @@ export function createGraphScreen({ lineup, onViewChange }) {
   const singletonLabel = root.querySelector('.singletons-label');
   const progressCounter = root.querySelector('.progress-counter');
   const progressFill = root.querySelector('.progress-fill');
-  const resolvingIndicator = root.querySelector('.resolving-indicator');
+  const progressBar = root.querySelector('.progress-bar');
+  // The bar shimmers while the walk is still streaming — the "it's alive" signal,
+  // visible no matter how slowly the honest fill advances.
+  progressBar.classList.add('is-resolving');
 
   const tabs = createViewTabs({ onChange: (v) => onViewChange?.(v) });
   tabs.setActive('graph');
@@ -63,6 +61,13 @@ export function createGraphScreen({ lineup, onViewChange }) {
   fitBtn.title = 'Fit graph to view';
   fitBtn.textContent = 'Fit';
   graphRegion.append(fitBtn);
+
+  // Plain-language reassurance shown only when a run is projected to be slow (a
+  // lineup we haven't looked up before takes far longer than a cached one).
+  const progressHint = document.createElement('div');
+  progressHint.className = 'progress-hint';
+  progressHint.textContent = 'First time looking up this lineup — this can take a few minutes.';
+  graphRegion.append(progressHint);
 
   const focusPanel = createFocusPanel();
   panelHost.append(focusPanel.el);
@@ -86,6 +91,8 @@ export function createGraphScreen({ lineup, onViewChange }) {
   let manualFocusCluster = null;
   let finalized = false;
   let firstLayoutRun = true;
+  const startTime = performance.now();
+  let hintShown = false;
 
   const layout = createLayout({ width: 100, height: 100 });
 
@@ -163,14 +170,19 @@ export function createGraphScreen({ lineup, onViewChange }) {
   }
 
   // Recompute layout (runs the sim) THEN render. Only for real changes: new
-  // data arriving (scheduleRelayout) and resize.
-  function recomputeLayoutAndRender() {
+  // data arriving (scheduleRelayout) and resize. `settle` runs the finalize-only
+  // feature-aware de-collision pass (node↔foreign-edge), used once at finalize.
+  function recomputeLayoutAndRender(settle = false) {
     const { width, height } = paneDims();
     layout.resize({ width, height });
 
     const clusterNames = [...clusterMembers()];
     if (clusterNames.length > 0) {
-      const result = layout.compute({ clusters: currentGraph.clusters }, firstLayoutRun ? 250 : 70);
+      const result = layout.compute(
+        { clusters: currentGraph.clusters },
+        firstLayoutRun ? 250 : 70,
+        { settle },
+      );
       lastPositions = result.positions;
       lastBounds = result.bounds;
     } else {
@@ -209,9 +221,25 @@ export function createGraphScreen({ lineup, onViewChange }) {
   }
 
   function updateProgress() {
-    const pct = Math.round((completedNames.size / Math.max(1, lineup.length)) * 100);
+    const completed = completedNames.size;
+    const total = Math.max(1, lineup.length);
+    const pct = Math.round((completed / total) * 100);
     progressCounter.textContent = `${String(pct).padStart(3, '0')}%`;
     progressFill.style.width = `${pct}%`;
+
+    // Project the remaining time from the observed completion rate; if it's going
+    // to be a long haul (an un-cached lineup), latch the reassurance on. Wait for a
+    // few completions + a little wall-clock so the rate estimate is stable.
+    if (!hintShown && !finalized && completed >= 3) {
+      const elapsed = (performance.now() - startTime) / 1000;
+      if (elapsed > 6) {
+        const projectedRemaining = ((total - completed) / completed) * elapsed;
+        if (projectedRemaining > 45) {
+          hintShown = true;
+          progressHint.classList.add('is-visible');
+        }
+      }
+    }
   }
 
   // ── Init ───────────────────────────────────────────────────────────
@@ -336,9 +364,18 @@ export function createGraphScreen({ lineup, onViewChange }) {
 
   function finalize() {
     finalized = true;
-    resolvingIndicator.classList.add('is-hidden');
     progressCounter.textContent = '100%';
     progressFill.style.width = '100%';
+    progressBar.classList.remove('is-resolving');
+    progressHint.classList.remove('is-visible');
+    // One settling pass to clear node↔foreign-edge intrusions left by the
+    // box-only de-collision during streaming. Cancel any pending relayout so it
+    // doesn't run a non-settle pass right after and undo the cleanup.
+    if (relayoutTimer != null) {
+      clearTimeout(relayoutTimer);
+      relayoutTimer = null;
+    }
+    recomputeLayoutAndRender(true);
     renderSingletons();
   }
 

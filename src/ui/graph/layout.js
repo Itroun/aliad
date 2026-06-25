@@ -295,6 +295,79 @@ function separateClusters(groups, pos, side, frozen) {
   return disp;
 }
 
+// Shortest distance from point p to segment a–b (and the closest point on it).
+function pointSegment(p, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = a.x + t * dx;
+  const cy = a.y + t * dy;
+  return { dist: Math.hypot(p.x - cx, p.y - cy), cx, cy };
+}
+
+// Finalize-only feature-aware de-collision. Box separation guarantees clusters'
+// bounding BOXES don't overlap, but a box is a loose container: a node of one
+// cluster can still sit on an EDGE of another that cuts diagonally through the
+// gap (the "Man With No Name on the Dado→Federico line" artifact). Here we look at
+// the real geometry — every node vs every FOREIGN cluster's edges — and push the
+// two clusters apart along the intrusion normal until each node clears foreign
+// edges by `clearance`. Deliberately NOT run during streaming (its finer-grained
+// triggers would add motion); it's a single settling pass once the walk ends.
+// Returns net per-group displacement so callers can persist the moved centres.
+function separateClusterFeatures(groups, pos, clearance) {
+  const disp = groups.map(() => ({ x: 0, y: 0 }));
+  for (let it = 0; it < 24; it++) {
+    const push = groups.map(() => ({ x: 0, y: 0 }));
+    let any = false;
+
+    for (let i = 0; i < groups.length; i++) {
+      for (let j = 0; j < groups.length; j++) {
+        if (i === j || groups[j].edges.length === 0) continue;
+        for (const name of groups[i].names) {
+          const p = pos.get(name);
+          for (const e of groups[j].edges) {
+            const a = pos.get(e.a);
+            const b = pos.get(e.b);
+            if (!a || !b) continue;
+            const { dist, cx, cy } = pointSegment(p, a, b);
+            if (dist >= clearance) continue;
+            any = true;
+            // Push cluster i away from the edge (and j the opposite way), sharing
+            // the shortfall so neither bears the whole move.
+            let nx = p.x - cx;
+            let ny = p.y - cy;
+            const len = Math.hypot(nx, ny) || 1;
+            nx /= len;
+            ny /= len;
+            const shortfall = (clearance - dist) * 0.5;
+            push[i].x += nx * shortfall;
+            push[i].y += ny * shortfall;
+            push[j].x -= nx * shortfall;
+            push[j].y -= ny * shortfall;
+          }
+        }
+      }
+    }
+    if (!any) break;
+
+    for (let i = 0; i < groups.length; i++) {
+      const dx = push[i].x * 0.5;
+      const dy = push[i].y * 0.5;
+      if (Math.abs(dx) < 0.4 && Math.abs(dy) < 0.4) continue;
+      for (const name of groups[i].names) {
+        const p = pos.get(name);
+        p.x += dx;
+        p.y += dy;
+      }
+      disp[i].x += dx;
+      disp[i].y += dy;
+    }
+  }
+  return disp;
+}
+
 // World-space AABB union across all clusters (label footprints included), used by
 // the viewport to fit/centre the whole graph. Empty input yields null.
 function contentBounds(groups, pos, side) {
@@ -366,7 +439,7 @@ export function createLayout({ width, height }) {
     });
   }
 
-  function compute({ clusters = [] }, iterations = 200) {
+  function compute({ clusters = [] }, iterations = 200, { settle = false } = {}) {
     const cfg = {
       // Repulsion is raised (vs the original 12000) so an appendage — a "leg" of
       // nodes off one triangle vertex — is pushed OUTWARD rather than folded back
@@ -423,6 +496,7 @@ export function createLayout({ width, height }) {
       }
       clusterInfos.push({
         names,
+        edges,
         r: boundingRadius(nodeList, 44),
       });
     }
@@ -494,7 +568,7 @@ export function createLayout({ width, height }) {
           y: a.centre.y + p.x * sin + p.y * cos,
         });
       }
-      groups.push({ names: info.names });
+      groups.push({ names: info.names, edges: info.edges });
       frozen.push(!a.isNew);
     }
 
@@ -502,12 +576,28 @@ export function createLayout({ width, height }) {
     // overlap apart (frozen clusters stay put). Fold each nudge back into the
     // stored centre so a just-placed cluster doesn't jump once it freezes.
     const side = computeLabelSides(groups, allEdges, pos, width);
+    // New objects (not in-place mutation): a frozen cluster's `centre` is shared
+    // with the prior placed entry, so mutating it would clobber shared state.
     const disp = separateClusters(groups, pos, side, frozen);
     for (let idx = 0; idx < clusterInfos.length; idx++) {
       assign[idx].centre = {
         x: assign[idx].centre.x + disp[idx].x,
         y: assign[idx].centre.y + disp[idx].y,
       };
+    }
+
+    // Finalize-only: clear node↔foreign-edge intrusions the box pass can't see.
+    // Run after box separation so it works from a non-overlapping starting point,
+    // and fold its displacement into the centres too (so a later resize keeps the
+    // cleaned-up layout).
+    if (settle) {
+      const fdisp = separateClusterFeatures(groups, pos, 24);
+      for (let idx = 0; idx < clusterInfos.length; idx++) {
+        assign[idx].centre = {
+          x: assign[idx].centre.x + fdisp[idx].x,
+          y: assign[idx].centre.y + fdisp[idx].y,
+        };
+      }
     }
 
     // Persist the frozen placement for the next compute.
