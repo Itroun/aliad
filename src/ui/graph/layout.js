@@ -231,8 +231,20 @@ function clusterAABB(names, pos, side, margin) {
 // world space — clusters spread as far as they need; the pan/zoom viewport
 // (graphScreen + viewport.js) reframes the result, so there is no on-canvas clamp
 // to pin clusters together when the lineup grows.
-function separateClusters(groups, pos, side) {
+// Push apart any clusters whose label boxes actually overlap. Calm by virtue of
+// being overlap-driven: in the steady state (no overlaps) nothing moves, so a
+// settled field stays put — motion only happens to resolve a genuine collision
+// (a cluster grew into a neighbour, or a merge landed two bodies close).
+//
+// `frozen[i]` marks an already-placed cluster. Two frozen clusters that collide
+// DO separate (both share the push) — otherwise the overlap would be permanent.
+// But a frozen cluster never yields to a brand-NEW neighbour: in a mixed pair the
+// newcomer shoulders the whole push and relocates, so existing clusters don't
+// twitch every time an act streams in. Returns net per-group displacement so the
+// caller can fold it into the stored centre (else a moved cluster jumps back).
+function separateClusters(groups, pos, side, frozen) {
   const MARGIN = 8;
+  const disp = groups.map(() => ({ x: 0, y: 0 }));
   for (let it = 0; it < 30; it++) {
     const boxes = groups.map((g) => clusterAABB(g.names, pos, side, MARGIN));
     const push = groups.map(() => ({ x: 0, y: 0 }));
@@ -246,15 +258,22 @@ function separateClusters(groups, pos, side) {
         const oy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
         if (ox <= 0 || oy <= 0) continue;
         any = true;
-        // Separate along the axis of least penetration.
+        // Share weighting: in a frozen↔new pair the new one takes the full push
+        // (wi=1, wj=0); otherwise split it evenly.
+        let wi = 0.5;
+        let wj = 0.5;
+        if (frozen[i] !== frozen[j]) {
+          wi = frozen[i] ? 0 : 1;
+          wj = frozen[j] ? 0 : 1;
+        }
         if (ox <= oy) {
-          const s = ((a.x0 + a.x1) / 2 <= (b.x0 + b.x1) / 2 ? -1 : 1) * (ox / 2);
-          push[i].x += s;
-          push[j].x -= s;
+          const dir = (a.x0 + a.x1) / 2 <= (b.x0 + b.x1) / 2 ? -1 : 1;
+          push[i].x += dir * ox * wi;
+          push[j].x -= dir * ox * wj;
         } else {
-          const s = ((a.y0 + a.y1) / 2 <= (b.y0 + b.y1) / 2 ? -1 : 1) * (oy / 2);
-          push[i].y += s;
-          push[j].y -= s;
+          const dir = (a.y0 + a.y1) / 2 <= (b.y0 + b.y1) / 2 ? -1 : 1;
+          push[i].y += dir * oy * wi;
+          push[j].y -= dir * oy * wj;
         }
       }
     }
@@ -269,8 +288,11 @@ function separateClusters(groups, pos, side) {
         p.x += dx;
         p.y += dy;
       }
+      disp[i].x += dx;
+      disp[i].y += dy;
     }
   }
+  return disp;
 }
 
 // World-space AABB union across all clusters (label footprints included), used by
@@ -290,51 +312,47 @@ function contentBounds(groups, pos, side) {
   return Number.isFinite(x0) ? { x0, y0, x1, y1 } : null;
 }
 
-// Greedy circle packing: place the largest cluster at the canvas centre, then
-// place each subsequent cluster at the first candidate position that doesn't
-// overlap an already-placed circle. Candidates are sampled along rings of
-// increasing radius around the centre.
-function packClusters(circles, width, height, gap) {
-  const placed = [];
+// Place ONE cluster of radius `r` into the first free slot — sampled along rings
+// of increasing radius around the canvas centre — that doesn't overlap any
+// already-placed circle. This is the incremental, append-only replacement for
+// the old global repack: existing clusters never move, a new cluster just slots
+// into the nearest gap and is then frozen by the caller.
+function placeOne(existing, r, width, height, gap) {
   const cx = width / 2;
   const cy = height / 2;
-  const sorted = [...circles].sort((a, b) => b.r - a.r);
-
-  for (const c of sorted) {
-    let best = null;
-    const maxR = Math.hypot(width, height);
-    const step = Math.max(20, c.r * 0.4);
-    outer: for (let ring = 0; ring <= maxR; ring += step) {
-      const samples = ring === 0 ? 1 : Math.max(8, Math.ceil((2 * Math.PI * ring) / step));
-      for (let s = 0; s < samples; s++) {
-        const a = (s / samples) * 2 * Math.PI;
-        const x = cx + Math.cos(a) * ring;
-        const y = cy + Math.sin(a) * ring;
-        let ok = true;
-        for (const p of placed) {
-          const d = Math.hypot(x - p.x, y - p.y);
-          if (d < c.r + p.r + gap) {
-            ok = false;
-            break;
-          }
-        }
-        if (ok) {
-          best = { x, y };
-          break outer;
+  // Reach well past the pane: layout lives in unbounded world space and the
+  // viewport reframes, so a new cluster may legitimately land far out.
+  const maxR = Math.hypot(width, height) + r * 6;
+  const step = Math.max(20, r * 0.4);
+  for (let ring = 0; ring <= maxR; ring += step) {
+    const samples = ring === 0 ? 1 : Math.max(8, Math.ceil((2 * Math.PI * ring) / step));
+    for (let s = 0; s < samples; s++) {
+      const a = (s / samples) * 2 * Math.PI;
+      const x = cx + Math.cos(a) * ring;
+      const y = cy + Math.sin(a) * ring;
+      let ok = true;
+      for (const p of existing) {
+        if (Math.hypot(x - p.centre.x, y - p.centre.y) < r + p.radius + gap) {
+          ok = false;
+          break;
         }
       }
+      if (ok) return { x, y };
     }
-    if (!best) best = { x: cx, y: cy };
-    placed.push({ ...c, x: best.x, y: best.y });
   }
-  const byId = new Map();
-  for (const p of placed) byId.set(p.id, p);
-  return byId;
+  return { x: cx, y: cy };
 }
 
 export function createLayout({ width, height }) {
   // Local positions, stored in cluster-local coords (relative to cluster centre).
   const localPositions = new Map(); // name → { x, y, vx, vy }
+
+  // Frozen inter-cluster placement, persisted across compute() calls. Each entry:
+  // { members: Set<name>, centre: { x, y }, radius, angle }. Current clusters are
+  // matched to these by member overlap so a cluster keeps its spot (and rotation)
+  // as it grows; only genuinely-new clusters get a fresh slot. See
+  // project_layout_incremental_placement memory for the full rationale.
+  let placed = [];
 
   function seedLocal(name, indexInCluster) {
     // Place new nodes on a small ring so they don't stack at the origin.
@@ -404,44 +422,101 @@ export function createLayout({ width, height }) {
         n.y -= my;
       }
       clusterInfos.push({
-        id: `c${ci}`,
         names,
         r: boundingRadius(nodeList, 44),
       });
     }
 
-    // Uniform breathing gap between clusters — gives labels some room without the
-    // per-cluster radius inflation that pushed clusters to the canvas edges.
-    const packed = packClusters(clusterInfos, width, height, 72);
+    // ── Incremental, append-only placement ────────────────────────────
+    // Match each current cluster to a previously-placed one by member overlap and
+    // reuse its centre + rotation (so it stays put as it grows); only genuinely-new
+    // clusters get a fresh slot, which is then frozen. Process largest-first so on
+    // a merge the biggest predecessor's spot wins, and on a split the biggest
+    // surviving piece keeps the spot while the stranded piece is treated as new.
+    const RESERVE = 40; // padding baked into the stored radius to absorb growth
+    const GAP = 72; // uniform breathing gap between clusters
+    const order = clusterInfos
+      .map((_, i) => i)
+      .sort((a, b) => clusterInfos[b].names.length - clusterInfos[a].names.length);
 
-    // Convert to absolute WORLD positions from the packed cluster centres. No
+    const prev = placed;
+    const claimed = new Set();
+    const assign = new Array(clusterInfos.length); // idx → { centre, angle, radius, isNew }
+    const placedSoFar = []; // { centre, radius } assigned this compute (for placeOne)
+
+    for (const idx of order) {
+      const info = clusterInfos[idx];
+      // Best (largest-radius) unclaimed predecessor sharing at least one member.
+      let best = null;
+      let bestK = -1;
+      for (let k = 0; k < prev.length; k++) {
+        if (claimed.has(k)) continue;
+        const p = prev[k];
+        if (!info.names.some((n) => p.members.has(n))) continue;
+        if (!best || p.radius > best.radius) {
+          best = p;
+          bestK = k;
+        }
+      }
+      let centre;
+      let angle;
+      const isNew = !best;
+      if (best) {
+        claimed.add(bestK);
+        centre = best.centre;
+        angle = best.angle; // keep the frozen rotation — no per-growth snapping
+      } else {
+        centre = placeOne(placedSoFar, info.r + RESERVE, width, height, GAP);
+        angle = clusterAngle(info.names);
+      }
+      const radius = Math.max(best?.radius ?? 0, info.r + RESERVE);
+      assign[idx] = { centre, angle, radius, isNew };
+      placedSoFar.push({ centre, radius });
+    }
+
+    // Convert to absolute WORLD positions from the assigned cluster centres. No
     // viewport clamp here — the layout lives in unbounded world space and the
-    // pan/zoom viewport (graphScreen + viewport.js) fits it into the pane. The
-    // packed centres are seeded around the pane size only as a starting spread.
+    // pan/zoom viewport (graphScreen + viewport.js) fits it into the pane.
     const pos = new Map();
     const groups = [];
-    for (const info of clusterInfos) {
-      const centre = packed.get(info.id);
-      // Rotate the cluster by its own hashed angle so orientations vary. Applied
-      // to a COPY (localPositions stay un-rotated) so the rotation isn't compounded
-      // on the next warm-started recompute.
-      const theta = clusterAngle(info.names);
-      const cos = Math.cos(theta);
-      const sin = Math.sin(theta);
+    const frozen = [];
+    for (let idx = 0; idx < clusterInfos.length; idx++) {
+      const info = clusterInfos[idx];
+      const a = assign[idx];
+      // Rotate the cluster by its frozen angle. Applied to a COPY (localPositions
+      // stay un-rotated) so the rotation isn't compounded on the next recompute.
+      const cos = Math.cos(a.angle);
+      const sin = Math.sin(a.angle);
       for (const name of info.names) {
         const p = localPositions.get(name);
         pos.set(name, {
-          x: centre.x + p.x * cos - p.y * sin,
-          y: centre.y + p.x * sin + p.y * cos,
+          x: a.centre.x + p.x * cos - p.y * sin,
+          y: a.centre.y + p.x * sin + p.y * cos,
         });
       }
-      groups.push({ id: info.id, names: info.names });
+      groups.push({ names: info.names });
+      frozen.push(!a.isNew);
     }
 
-    // Decide label sides once, then nudge any clusters whose labels/dots still
-    // overlap apart (the circle packing only separated dots, not labels).
+    // Decide label sides once, then nudge only NEW clusters whose labels/dots
+    // overlap apart (frozen clusters stay put). Fold each nudge back into the
+    // stored centre so a just-placed cluster doesn't jump once it freezes.
     const side = computeLabelSides(groups, allEdges, pos, width);
-    separateClusters(groups, pos, side);
+    const disp = separateClusters(groups, pos, side, frozen);
+    for (let idx = 0; idx < clusterInfos.length; idx++) {
+      assign[idx].centre = {
+        x: assign[idx].centre.x + disp[idx].x,
+        y: assign[idx].centre.y + disp[idx].y,
+      };
+    }
+
+    // Persist the frozen placement for the next compute.
+    placed = clusterInfos.map((info, idx) => ({
+      members: new Set(info.names),
+      centre: assign[idx].centre,
+      radius: assign[idx].radius,
+      angle: assign[idx].angle,
+    }));
 
     // Emit world positions + the label side. Label-side choice is final here
     // (no canvas-edge flip): clusters are no longer pinned to the pane, so a
