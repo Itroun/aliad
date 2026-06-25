@@ -41,9 +41,21 @@ export function createGraphPane() {
     return `${a}||${b}`;
   }
 
-  function update({ width, height, nodes, edges, positions, kinds, focusedEdgeKey, onEdgeClick }) {
+  function update({
+    width,
+    height,
+    nodes,
+    edges,
+    positions,
+    kinds,
+    focusedClusterNodes,
+    onClusterClick,
+  }) {
     svg.setAttribute('width', width);
     svg.setAttribute('height', height);
+    // When a cluster is focused, everything outside it recedes. Null/empty set
+    // means nothing is selected → no dimming anywhere.
+    const hasFocus = focusedClusterNodes && focusedClusterNodes.size > 0;
 
     // ── Edges: reconcile elements; geometry is applied each frame from rendered
     // positions so edges follow the nodes' easing. ──────────────────────
@@ -60,11 +72,15 @@ export function createGraphPane() {
           <line class="edge-line" stroke-linecap="round"></line>
           <g class="edge-ticks"></g>
         `;
-        g.addEventListener('click', () => onEdgeClick?.(edge));
+        g.addEventListener('click', () => onClusterClick?.(edge.a));
         edgeVp.append(g);
         edgeEls.set(key, g);
       }
-      g.classList.toggle('is-focused', key === focusedEdgeKey);
+      // An edge belongs to exactly one cluster, so testing either endpoint is
+      // enough to know whether this edge is inside the focused cluster.
+      const inFocus = hasFocus && focusedClusterNodes.has(edge.a);
+      g.classList.toggle('is-focused', inFocus);
+      g.classList.toggle('is-dimmed', hasFocus && !inFocus);
       edgeData.set(key, { a: edge.a, b: edge.b, evCount: edge.evidence.length });
     }
     for (const [key, el] of edgeEls) {
@@ -91,6 +107,7 @@ export function createGraphPane() {
         // all at once (capped so a big first batch doesn't drag).
         el.style.setProperty('--enter-delay', `${Math.min(newCount * 35, 280)}ms`);
         newCount++;
+        el.addEventListener('click', () => onClusterClick?.(name));
         nodesLayer.append(el);
         nodeEls.set(name, el);
         // A new node appears AT its target (then fades/pops in), not gliding in.
@@ -108,6 +125,7 @@ export function createGraphPane() {
       // with an on-canvas guard) is decided in the layout so the de-collision
       // pass and the renderer agree on each label's footprint.
       el.classList.toggle('align-left', !!pos.labelLeft);
+      el.classList.toggle('is-dimmed', hasFocus && !focusedClusterNodes.has(name));
     }
     for (const [name, el] of nodeEls) {
       if (!seenNodes.has(name)) {

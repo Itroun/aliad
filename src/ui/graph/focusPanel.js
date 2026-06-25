@@ -1,5 +1,6 @@
-// Right-panel "Connection" section: title, collapsible evidence list.
-// Exposes update(edge) to swap in a new focused edge; null to show placeholder.
+// Right-panel "Connections" section: a header for the selected cluster plus one
+// collapsible evidence block per edge in that cluster.
+// Exposes update(cluster) to swap in a new focused cluster; null shows placeholder.
 
 export function createFocusPanel() {
   const root = document.createElement('div');
@@ -10,18 +11,22 @@ export function createFocusPanel() {
   `;
 
   const body = root.querySelector('.panel-body');
-  let expanded = true;
-  let currentEdgeKey = null;
+  let currentClusterId = null;
+  // Per-edge expand/collapse state, keyed by "a||b". Defaults to expanded;
+  // clusters are small (1–5 edges) so everything opens by default.
+  const expanded = new Map();
 
   function edgeKey(edge) {
-    return edge ? `${edge.a}||${edge.b}` : null;
+    return `${edge.a}||${edge.b}`;
   }
 
   function renderPlaceholder() {
     body.innerHTML = `<div class="panel-placeholder">Click a cluster to see its connections.</div>`;
   }
 
-  function renderEdge(edge) {
+  function edgeSection(edge) {
+    const key = edgeKey(edge);
+    const isOpen = expanded.get(key) !== false;
     const count = edge.evidence.length;
     const label = count === 1 ? 'connection' : 'connections';
     const ev = edge.evidence
@@ -47,36 +52,48 @@ export function createFocusPanel() {
       })
       .join('');
 
-    body.innerHTML = `
-      <div class="connection-title">
-        <span>${escape(edge.a)}</span>
-        <span class="connection-sep">↔</span>
-        <span>${escape(edge.b)}</span>
+    return `
+      <div class="connection-edge" data-edge-key="${escape(key)}">
+        <div class="connection-title">
+          <span>${escape(edge.a)}</span>
+          <span class="connection-sep">↔</span>
+          <span>${escape(edge.b)}</span>
+        </div>
+        <button type="button" class="connection-toggle ${isOpen ? 'is-expanded' : ''}">
+          <svg class="toggle-caret" width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M1 0l6 4-6 4z"/></svg>
+          <span>${count} ${label}</span>
+        </button>
+        <div class="connection-evidence aliad-fadein ${isOpen ? 'is-open' : ''}">${ev}</div>
       </div>
-      <button type="button" class="connection-toggle ${expanded ? 'is-expanded' : ''}">
-        <svg class="toggle-caret" width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M1 0l6 4-6 4z"/></svg>
-        <span>${count} ${label}</span>
-      </button>
-      <div class="connection-evidence aliad-fadein ${expanded ? 'is-open' : ''}">${ev}</div>
+    `;
+  }
+
+  function renderCluster(cluster) {
+    const edges = cluster.edges;
+
+    body.innerHTML = `
+      <div class="cluster-edges">${edges.map(edgeSection).join('')}</div>
     `;
 
-    body.querySelector('.connection-toggle').addEventListener('click', () => {
-      expanded = !expanded;
-      const toggle = body.querySelector('.connection-toggle');
-      const list = body.querySelector('.connection-evidence');
-      toggle.classList.toggle('is-expanded', expanded);
-      list.classList.toggle('is-open', expanded);
+    body.querySelectorAll('.connection-edge').forEach((section) => {
+      const key = section.getAttribute('data-edge-key');
+      section.querySelector('.connection-toggle').addEventListener('click', () => {
+        const next = expanded.get(key) === false;
+        expanded.set(key, next);
+        section.querySelector('.connection-toggle').classList.toggle('is-expanded', next);
+        section.querySelector('.connection-evidence').classList.toggle('is-open', next);
+      });
     });
   }
 
-  function update(edge) {
-    const nextKey = edgeKey(edge);
-    if (nextKey !== currentEdgeKey) {
-      expanded = true;
-      currentEdgeKey = nextKey;
+  function update(cluster) {
+    const nextId = cluster ? cluster.id : null;
+    if (nextId !== currentClusterId) {
+      expanded.clear();
+      currentClusterId = nextId;
     }
-    if (!edge) renderPlaceholder();
-    else renderEdge(edge);
+    if (!cluster) renderPlaceholder();
+    else renderCluster(cluster);
   }
 
   update(null);

@@ -1,5 +1,5 @@
 import { buildGraph } from '../core/graph.js';
-import { diffGraph } from './graph/eventStream.js';
+import { normaliseName } from '../core/merge.js';
 import { createLayout } from './graph/layout.js';
 import { createGraphPane } from './graph/render.js';
 import { computeFitTransform, zoomAtPoint } from './graph/viewport.js';
@@ -31,11 +31,11 @@ export function createGraphScreen({ lineup, onViewChange }) {
     <aside class="detail-region">
       <div class="panel-host-connection"></div>
       <div class="panel-section panel-singletons" hidden>
+        <div class="singleton-list" hidden></div>
         <button type="button" class="panel-eyebrow singletons-toggle" aria-expanded="false">
           <span class="singletons-chevron">&#x25B8;</span>
           <span class="singletons-label"></span>
         </button>
-        <div class="singleton-list" hidden></div>
       </div>
     </aside>
   `;
@@ -78,17 +78,22 @@ export function createGraphScreen({ lineup, onViewChange }) {
   // ── State ──────────────────────────────────────────────────────────
   const completedResults = []; // [{ name, merged, closure, sources, parts }]
   const completedNames = new Set(); // lineup names that finished lookup
-  let prevGraph = { clusters: [], singletons: [], kinds: new Map() };
   let currentGraph = { clusters: [], singletons: [], kinds: new Map() };
-  let manualFocusKey = null;
-  let autoFocusKey = null;
+  // Focus is keyed on a representative member name (normalised), not the cluster
+  // id: ids (c${root}) shift as clusters merge during streaming, but a member
+  // name resolves robustly to whichever cluster currently contains it. Null = no
+  // selection (the panel shows its prompt) — the default until the user clicks.
+  let manualFocusCluster = null;
   let finalized = false;
   let firstLayoutRun = true;
 
   const layout = createLayout({ width: 100, height: 100 });
 
-  function edgeKey(edge) {
-    return `${edge.a}||${edge.b}`;
+  // Resolve a focus key (a normalised member name) to the cluster that currently
+  // contains it, or null if no longer present (e.g. it became a singleton).
+  function resolveCluster(key) {
+    if (!key) return null;
+    return currentGraph.clusters.find((c) => c.nodes.some((n) => normaliseName(n) === key)) || null;
   }
 
   function allEdges() {
@@ -135,8 +140,10 @@ export function createGraphScreen({ lineup, onViewChange }) {
     const { width, height } = paneDims();
     const clusterNames = [...clusterMembers()];
     const edges = allEdges();
-    const focusedKey = manualFocusKey ?? autoFocusKey;
-    const focusedEdge = edges.find((e) => edgeKey(e) === focusedKey) || null;
+    const focusedCluster = resolveCluster(manualFocusCluster);
+    const focusedClusterNodes = focusedCluster
+      ? new Set(focusedCluster.nodes)
+      : null;
 
     pane.update({
       width,
@@ -145,13 +152,13 @@ export function createGraphScreen({ lineup, onViewChange }) {
       edges,
       positions: lastPositions,
       kinds: currentGraph.kinds,
-      focusedEdgeKey: focusedKey,
-      onEdgeClick: (edge) => {
-        manualFocusKey = edgeKey(edge);
+      focusedClusterNodes,
+      onClusterClick: (name) => {
+        manualFocusCluster = normaliseName(name);
         render();
       },
     });
-    focusPanel.update(focusedEdge);
+    focusPanel.update(focusedCluster);
     renderSingletons();
   }
 
@@ -198,7 +205,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
     });
     // Hide the whole section when everything's connected; otherwise show the count.
     singletonSection.hidden = count === 0;
-    singletonLabel.textContent = `No connections found for ${count} act${count === 1 ? '' : 's'}`;
+    singletonLabel.textContent = `${count} act${count === 1 ? '' : 's'} with no connections`;
   }
 
   function updateProgress() {
@@ -263,17 +270,20 @@ export function createGraphScreen({ lineup, onViewChange }) {
     { passive: false },
   );
 
-  // Drag the empty canvas to pan. Starting on an edge is left to the edge's own
-  // click handler, so panning never steals an edge click.
+  // Drag the empty canvas to pan. Starting on an edge or node is left to that
+  // element's own click handler, so panning never steals a cluster-select click.
   let panFrom = null;
   pane.el.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || e.target.closest('.graph-edge')) return;
-    panFrom = { x: e.clientX, y: e.clientY, tx: viewport.tx, ty: viewport.ty };
+    if (e.button !== 0 || e.target.closest('.graph-edge, .graph-node')) return;
+    panFrom = { x: e.clientX, y: e.clientY, tx: viewport.tx, ty: viewport.ty, moved: false };
     pane.el.classList.add('is-panning');
     pane.el.setPointerCapture(e.pointerId);
   });
   pane.el.addEventListener('pointermove', (e) => {
     if (!panFrom) return;
+    if (Math.abs(e.clientX - panFrom.x) > 3 || Math.abs(e.clientY - panFrom.y) > 3) {
+      panFrom.moved = true;
+    }
     viewport = {
       ...viewport,
       tx: panFrom.tx + (e.clientX - panFrom.x),
@@ -284,9 +294,15 @@ export function createGraphScreen({ lineup, onViewChange }) {
   });
   const endPan = (e) => {
     if (!panFrom) return;
+    const wasClick = !panFrom.moved;
     panFrom = null;
     pane.el.classList.remove('is-panning');
     pane.el.releasePointerCapture?.(e.pointerId);
+    // A click on empty canvas (no drag) clears the selection back to the prompt.
+    if (wasClick && manualFocusCluster) {
+      manualFocusCluster = null;
+      render();
+    }
   };
   pane.el.addEventListener('pointerup', endPan);
   pane.el.addEventListener('pointercancel', endPan);
@@ -309,14 +325,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
       parts: summary.parts,
     });
 
-    prevGraph = currentGraph;
     currentGraph = buildGraph(completedResults);
-    const { newEdges } = diffGraph(prevGraph, currentGraph);
-
-    if (!manualFocusKey && newEdges.length > 0 && !autoFocusKey) {
-      autoFocusKey = edgeKey(newEdges[0].edge);
-    }
-
     updateProgress();
     scheduleRelayout();
   }
