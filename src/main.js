@@ -68,14 +68,22 @@ async function handleSubmit(input) {
   devProbe.reset();
   if (input.pasteFormat) devProbe.note(`paste format: ${input.pasteFormat}`);
 
+  // Lock the form and turn the button into a live progress indicator: this stretch
+  // (URL fetch + the LLM extraction) is the several-second gap before the map
+  // appears, and otherwise looks like nothing is happening. URL submits start on
+  // "Fetching…"; extract() below flips every path to "Reading…" once it runs.
+  inputScreen.setBusy(input.type === 'url' ? 'Fetching the lineup…' : 'Reading the lineup…');
+
   try {
     const { artists } = await resolveInput(input, signal);
     if (!artists.length) {
+      inputScreen.clearBusy();
       setView('input');
       console.warn('No artist names found in input.');
       return;
     }
 
+    inputScreen.clearBusy();
     const graph = createGraphScreen({ lineup: artists, onViewChange: setView });
     replaceGraphScreen(graph);
     setView('graph');
@@ -108,13 +116,19 @@ async function handleSubmit(input) {
     if (signal.aborted) return;
     graph.finalize();
   } catch (err) {
+    // An aborted run was superseded by a newer submit, which has set its own busy
+    // state — leave it alone. Only a genuine failure unlocks the form here.
     if (err?.name === 'AbortError' || signal.aborted) return;
+    inputScreen.clearBusy();
     console.error(err);
     setView('input');
   }
 }
 
 function extract(content, type, signal) {
+  // Extraction is the dominant cost; once it starts, every path is "Reading…"
+  // (for URL submits this is the fetch→read handoff).
+  inputScreen.setBusy('Reading the lineup…');
   return extractArtists(content, {
     type,
     signal,

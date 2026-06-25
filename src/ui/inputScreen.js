@@ -76,7 +76,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
 
       <div class="decode-row">
         <button type="button" class="decode-btn" disabled>
-          <span>Map lineup</span><span class="decode-arrow">&rarr;</span>
+          <span class="decode-label">Map lineup</span><span class="decode-arrow">&rarr;</span><span class="decode-spinner" aria-hidden="true"></span>
         </button>
         <span class="decode-counter"></span>
       </div>
@@ -92,12 +92,33 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   const urlList = root.querySelector('.url-list');
   const urlAdd = root.querySelector('.url-add');
   const decodeBtn = root.querySelector('.decode-btn');
+  const decodeLabel = root.querySelector('.decode-label');
   const exampleBtn = root.querySelector('.example-btn');
   const counter = root.querySelector('.decode-counter');
 
   let pastedHTML = null;
   let pasteFormat = null;
   let justPasted = false;
+  // While resolving input (URL fetch + LLM extraction) the form is locked and the
+  // button becomes a live progress indicator. updateCounter() bails out so input
+  // events can't re-enable the button mid-flight.
+  let busy = false;
+
+  function setBusy(label) {
+    busy = true;
+    root.classList.add('is-busy');
+    decodeBtn.classList.add('is-busy');
+    decodeBtn.disabled = true;
+    decodeLabel.textContent = label;
+  }
+
+  function clearBusy() {
+    busy = false;
+    root.classList.remove('is-busy');
+    decodeBtn.classList.remove('is-busy');
+    decodeLabel.textContent = 'Map lineup';
+    updateCounter(); // restore the enabled/disabled state from current input
+  }
 
   function clearPasteState() {
     pastedHTML = null;
@@ -183,6 +204,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   }
 
   function updateCounter() {
+    if (busy) return; // locked while resolving — clearBusy() re-runs this after
     const text = textarea.value.trim();
     const urls = collectUrls();
     const hasInput = Boolean(text || urls.length);
@@ -248,5 +270,5 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   tabs.setActive('input');
   root.querySelector('.topbar-tabs').append(tabs.el);
 
-  return { el: root, setActiveView: tabs.setActive };
+  return { el: root, setActiveView: tabs.setActive, setBusy, clearBusy };
 }
