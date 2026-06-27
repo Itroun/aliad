@@ -1,5 +1,6 @@
 import { dedupeNames } from '../core/merge.js';
 import { createViewTabs } from './viewTabs.js';
+import { mountThemeToggle } from './themeToggle.js';
 
 export function parseLineup(text) {
   return dedupeNames(String(text ?? '').split('\n'));
@@ -41,6 +42,11 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
     </header>
     <main class="input-main">
       <div class="input-hero">
+        <div class="hero-stars" aria-hidden="true">
+          <span class="star">&#x2726;</span><span class="rule"></span>
+          <span class="star">&#x2726;</span><span class="rule"></span>
+          <span class="star">&#x2726;</span>
+        </div>
         <h1 class="input-title">Who&rsquo;s performing?</h1>
         <p class="input-lede">
           Paste a festival lineup or link one from the web.
@@ -269,6 +275,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   const tabs = createViewTabs({ onChange: (v) => onViewChange?.(v) });
   tabs.setActive('input');
   root.querySelector('.topbar-tabs').append(tabs.el);
+  mountThemeToggle(root.querySelector('.topbar'));
 
   return { el: root, setActiveView: tabs.setActive, setBusy, clearBusy };
 }

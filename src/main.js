@@ -1,4 +1,5 @@
 import './style.css';
+import { initTheme } from './ui/themeToggle.js';
 import { createInputScreen } from './ui/inputScreen.js';
 import { createGraphScreen } from './ui/graphScreen.js';
 import { createEmptyGraphScreen } from './ui/emptyGraphScreen.js';
@@ -6,6 +7,8 @@ import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
 import { detectInputType, extractArtists, combineExtractions } from './core/extract.js';
 import { cleanHTML } from './core/cleanHTML.js';
+
+initTheme();
 
 const app = document.querySelector('#app');
 const devProbe = createDevProbe();

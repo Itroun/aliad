@@ -1,4 +1,5 @@
 import { createViewTabs } from './viewTabs.js';
+import { mountThemeToggle } from './themeToggle.js';
 
 export function createEmptyGraphScreen({ onViewChange } = {}) {
   const root = document.createElement('div');
@@ -14,7 +15,13 @@ export function createEmptyGraphScreen({ onViewChange } = {}) {
     <section class="empty-graph-body">
       <div class="empty-graph-card">
         <div class="empty-graph-eyebrow">No lineup yet</div>
-        <p class="empty-graph-msg">Add one in Lineup view to see it mapped out.</p>
+        <h2 class="empty-graph-title">
+          <span class="title-dark">An empty sky.</span><span class="title-light">A blank chart.</span>
+        </h2>
+        <p class="empty-graph-msg">Add one in <em>Lineup</em> view to see it mapped out.</p>
+        <button type="button" class="decode-btn empty-graph-go">
+          <span class="decode-arrow" style="border-left:none;padding-left:0">&larr;</span><span>Go to lineup</span>
+        </button>
       </div>
     </section>
   `;
@@ -22,6 +29,9 @@ export function createEmptyGraphScreen({ onViewChange } = {}) {
   const tabs = createViewTabs({ onChange: (v) => onViewChange?.(v) });
   tabs.setActive('graph');
   root.querySelector('.topbar-tabs').append(tabs.el);
+  mountThemeToggle(root.querySelector('.topbar'));
+
+  root.querySelector('.empty-graph-go').addEventListener('click', () => onViewChange?.('input'));
 
   return { el: root, setActiveView: tabs.setActive };
 }
