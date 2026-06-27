@@ -19,7 +19,7 @@
   /* ── Shape ────────────────────────────────────────────── */
   --radius: 3px;
   --topbar-h: 62px;
-  --inspector-w: 390px;
+  --inspector-w: 448px;
 
   /* ── Dark "Constellation" (default) ───────────────────── */
   --bg: #070a17;
@@ -1143,16 +1143,6 @@ body > #app {
     font-size 0.4s ease;
 }
 
-/* Secondary / person names read quieter (and italic in the light chart). */
-.node-kind-person .node-label {
-  color: var(--muted);
-  font-weight: 300;
-}
-
-.theme-light .node-kind-person .node-label {
-  font-style: italic;
-}
-
 /* Collaboration acts ("X vs Y") get a slightly larger, emphasised label. */
 .node-kind-collab .node-label {
   font-size: 15px;
@@ -1283,8 +1273,9 @@ body > #app {
 }
 
 .connection-title {
-  font-family: var(--ff-display);
-  font-size: 24px;
+  font-family: var(--ff-serif);
+  font-weight: 700;
+  font-size: 20px;
   line-height: 1.2;
   color: var(--fg);
   margin-bottom: 16px;
