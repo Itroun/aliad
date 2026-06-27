@@ -20,7 +20,7 @@ export function createEmptyGraphScreen({ onViewChange } = {}) {
         </h2>
         <p class="empty-graph-msg">Add one in <em>Lineup</em> view to see it mapped out.</p>
         <button type="button" class="decode-btn empty-graph-go">
-          <span class="decode-arrow" style="border-left:none;padding-left:0">&larr;</span><span>Go to lineup</span>
+          <span>Go to lineup</span>
         </button>
       </div>
     </section>

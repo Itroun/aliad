@@ -287,9 +287,9 @@ body > #app {
   background: var(--field-fill);
 }
 
-/* On the map screen the toggle sits after the progress chrome, not pushed
-   to the far edge (topbar-right already owns the right side). */
-.screen-graph .topbar .theme-toggle {
+/* When the progress chrome is present (populated map), the toggle sits just
+   after it with a fixed gap; otherwise margin-left:auto keeps it far right. */
+.topbar-right ~ .theme-toggle {
   margin-left: 14px;
 }
 
@@ -653,12 +653,6 @@ body > #app {
   filter: brightness(1.05);
 }
 
-.decode-arrow {
-  padding-left: 14px;
-  border-left: 1px solid currentColor;
-  opacity: 0.75;
-}
-
 /* Disabled: drops to outline only, muted text, not-allowed. */
 .decode-btn:disabled {
   background: transparent;
@@ -668,12 +662,8 @@ body > #app {
   cursor: not-allowed;
 }
 
-.decode-btn:disabled .decode-arrow {
-  border-left-color: var(--hairline);
-}
-
-/* Busy: holds the fill, swaps the arrow for the rotating ◴ spinner, and the
-   button itself becomes the progress affordance while the form locks. */
+/* Busy: holds the fill, shows the rotating ◴ spinner, and the button itself
+   becomes the progress affordance while the form locks. */
 .decode-btn.is-busy,
 .decode-btn.is-busy:disabled {
   background: var(--btn-fill);
@@ -681,10 +671,6 @@ body > #app {
   color: var(--btn-fg);
   box-shadow: var(--btn-keyline), var(--btn-glow);
   cursor: default;
-}
-
-.decode-btn.is-busy .decode-arrow {
-  display: none;
 }
 
 .decode-spinner {
@@ -715,25 +701,33 @@ body > #app {
   color: var(--muted);
 }
 
+/* Brand mark left, external link right — a small hairline-topped footer row. */
 .input-footer {
   margin-top: 64px;
   padding-top: 22px;
   border-top: 1px solid var(--hairline);
   display: flex;
-  justify-content: center;
-  align-items: center;
-  font-family: var(--ff-display);
-  font-size: 17px;
-  color: var(--faint);
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
 }
 
-.input-footer a {
-  color: inherit;
+.footer-mark {
+  font-family: var(--ff-display);
+  font-size: 17px;
+  color: var(--muted);
+}
+
+.footer-link {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
   text-decoration: none;
   transition: color 0.14s ease;
 }
 
-.input-footer a:hover {
+.footer-link:hover {
   color: var(--accent);
 }
 

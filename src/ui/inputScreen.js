@@ -82,14 +82,15 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
 
       <div class="decode-row">
         <button type="button" class="decode-btn" disabled>
-          <span class="decode-label">Map lineup</span><span class="decode-arrow">&rarr;</span><span class="decode-spinner" aria-hidden="true"></span>
+          <span class="decode-label">Map lineup</span><span class="decode-spinner" aria-hidden="true"></span>
         </button>
         <span class="decode-counter"></span>
       </div>
 
       <div class="input-footer">
-        <!-- TODO(deploy): point href at the real Aliad repo. -->
-        <a href="https://github.com/example/aliad" target="_blank" rel="noopener noreferrer">aliad</a>
+        <span class="footer-mark">aliad</span>
+        <!-- TODO(deploy): point href at the real aliad repo. -->
+        <a class="footer-link" href="https://github.com/example/aliad" target="_blank" rel="noopener noreferrer">github</a>
       </div>
     </main>
   `;
