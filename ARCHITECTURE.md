@@ -180,6 +180,17 @@ Both lookups go through `/api/lookup`, which injects credentials server-side
 - **Progressive > complete.** First byte beats lowest latency to full results.
 - **No framework.** Plain DOM, plain ES modules, plain CSS — readable within
   minutes of cloning.
+- **Two themes, one class.** Dark "Constellation" and light "Nautical Chart"
+  are pure CSS variable swaps keyed off a `.theme-dark` / `.theme-light` class
+  on `<html>` (set by `ui/themeToggle.js`, persisted in localStorage, dark by
+  default); structural differences (star field vs chart grid, solid vs dashed
+  edges, node shapes) are theme-scoped rules. Keep new styling variable-driven
+  so both themes stay in sync.
+- **Chrome placement.** Persistent controls live in the top bar (view tabs +
+  theme toggle), present on every screen. The footer (brand mark + external
+  links) lives only on the lineup screen — footers belong on document-like,
+  scrollable pages; the map view is a full-screen app canvas, so anything that
+  must be reachable there goes in the top bar, not a footer.
 - **Tests are pure + fast.** Cores are unit-tested with injected `fetchFn` / `sleep`
   and fixture captures under `tests/fixtures/` — no real timers or network. MB
   fixtures are real captures; Discogs fixtures are synthesised (tagged `_note`)
