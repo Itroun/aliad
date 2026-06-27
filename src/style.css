@@ -310,9 +310,9 @@ body > #app {
 
 .empty-graph-card {
   position: relative;
-  max-width: 420px;
+  max-width: 560px;
   text-align: center;
-  padding: 52px 56px;
+  padding: 56px 64px;
 }
 
 /* Dark: corner ticks frame the card. Light: a double inset border. */
@@ -356,8 +356,9 @@ body > #app {
 
 .empty-graph-title {
   font-family: var(--ff-display);
-  font-size: 46px;
+  font-size: 56px;
   line-height: 1;
+  white-space: nowrap;
   color: var(--fg);
   margin: 0 0 18px;
 }
@@ -402,7 +403,7 @@ body > #app {
 
 .input-main {
   position: relative;
-  max-width: 600px;
+  max-width: 820px;
   margin: 0 auto;
   padding: 64px 28px 56px;
   z-index: 5;
@@ -435,7 +436,10 @@ body > #app {
 
 .input-title {
   font-family: var(--ff-display);
-  font-size: clamp(44px, 7vw, 70px);
+  /* One line on desktop: the floor scales it down on narrower viewports so it
+     never needs to wrap within the column. */
+  font-size: clamp(44px, 7vw, 76px);
+  white-space: nowrap;
   font-weight: 400;
   line-height: 0.98;
   margin: 0 0 22px;
@@ -449,7 +453,7 @@ body > #app {
   line-height: 1.6;
   color: var(--body);
   margin: 0 auto;
-  max-width: 560px;
+  max-width: 620px;
 }
 
 .lede-accent {
