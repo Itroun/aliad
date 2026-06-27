@@ -7,6 +7,7 @@ import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
 import { detectInputType, extractArtists, combineExtractions } from './core/extract.js';
 import { cleanHTML } from './core/cleanHTML.js';
+import { encodeLineup, decodeLineup } from './core/lineupUrl.js';
 
 initTheme();
 
@@ -28,6 +29,8 @@ const emptyGraphScreen = createEmptyGraphScreen({ onViewChange: setView });
 app.append(inputScreen.el);
 app.append(emptyGraphScreen.el);
 applyViewVisibility();
+
+bootFromHash();
 
 function cancelActive() {
   if (activeController) {
@@ -87,37 +90,7 @@ async function handleSubmit(input) {
     }
 
     inputScreen.clearBusy();
-    const graph = createGraphScreen({ lineup: artists, onViewChange: setView });
-    replaceGraphScreen(graph);
-    setView('graph');
-
-    await lookupAll(artists, {
-      signal,
-      onProviderResult: (artist, provider, outcome) => {
-        if (signal.aborted) return;
-        devProbe.providerResult(artist, {
-          line: formatProviderNote(artist, provider, outcome),
-          ok: outcome.ok,
-          serverCache: outcome.serverCache,
-        });
-        if (outcome.serverCache) devProbe.serverCache(outcome.serverCache);
-      },
-      onArtistDone: (artist, merged) => {
-        if (signal.aborted) return;
-        graph.onArtistDone(artist, merged);
-      },
-      onArtistComplete: (artist, merged, summary) => {
-        if (signal.aborted) return;
-        graph.onArtistComplete(artist, merged, summary);
-      },
-      onBudgetExhausted: (artist, info) => {
-        if (signal.aborted) return;
-        devProbe.note(`${artist} · expansion budget hit (${info.skipped} aliases not explored)`);
-      },
-    });
-
-    if (signal.aborted) return;
-    graph.finalize();
+    await runLineup(artists, signal);
   } catch (err) {
     // An aborted run was superseded by a newer submit, which has set its own busy
     // state — leave it alone. Only a genuine failure unlocks the form here.
@@ -126,6 +99,72 @@ async function handleSubmit(input) {
     console.error(err);
     setView('input');
   }
+}
+
+// Stage 2 → 3: given the resolved act names, persist them to the URL fragment
+// (so a refresh or a shared link restores this exact map) and run the live
+// identity-graph walk. Shared by the submit flow and the on-boot hash restore;
+// the caller owns the AbortController (submit reuses the one guarding the
+// fetch/extract step). Assumes `artists` is non-empty.
+async function runLineup(artists, signal) {
+  // Persisting to the URL is best-effort: a CompressionStream-less browser or a
+  // replaceState failure must never block the actual map from rendering.
+  try {
+    const frag = await encodeLineup(artists);
+    if (frag) history.replaceState(null, '', `#${frag}`);
+  } catch (err) {
+    console.warn('Could not persist lineup to URL', err);
+  }
+
+  const graph = createGraphScreen({ lineup: artists, onViewChange: setView });
+  replaceGraphScreen(graph);
+  setView('graph');
+
+  await lookupAll(artists, {
+    signal,
+    onProviderResult: (artist, provider, outcome) => {
+      if (signal.aborted) return;
+      devProbe.providerResult(artist, {
+        line: formatProviderNote(artist, provider, outcome),
+        ok: outcome.ok,
+        serverCache: outcome.serverCache,
+      });
+      if (outcome.serverCache) devProbe.serverCache(outcome.serverCache);
+    },
+    onArtistDone: (artist, merged) => {
+      if (signal.aborted) return;
+      graph.onArtistDone(artist, merged);
+    },
+    onArtistComplete: (artist, merged, summary) => {
+      if (signal.aborted) return;
+      graph.onArtistComplete(artist, merged, summary);
+    },
+    onBudgetExhausted: (artist, info) => {
+      if (signal.aborted) return;
+      devProbe.note(`${artist} · expansion budget hit (${info.skipped} aliases not explored)`);
+    },
+  });
+
+  if (signal.aborted) return;
+  graph.finalize();
+}
+
+// On load, restore the map from the URL fragment if one is present. We replay
+// the lookup walk (Stage 3) rather than re-fetching/re-extracting — the names
+// are already resolved, and the D1 cache makes the rebuild cheap.
+async function bootFromHash() {
+  const names = await decodeLineup(window.location.hash);
+  if (!names) return;
+
+  cancelActive();
+  activeController = new AbortController();
+  const signal = activeController.signal;
+  devProbe.reset();
+  runLineup(names, signal).catch((err) => {
+    if (err?.name === 'AbortError' || signal.aborted) return;
+    console.error(err);
+    setView('input');
+  });
 }
 
 function extract(content, type, signal) {
