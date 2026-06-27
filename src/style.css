@@ -508,10 +508,11 @@ body > #app {
   border: 1px solid var(--accent);
   border-radius: var(--radius);
   outline: none;
-  font-family: var(--ff-serif);
-  font-weight: 300;
-  font-size: 15px;
-  line-height: 1.6;
+  font-family: var(--ff-mono);
+  font-weight: 400;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  line-height: 1.7;
   transition:
     border-color 0.14s ease,
     box-shadow 0.14s ease;
