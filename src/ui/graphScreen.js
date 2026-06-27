@@ -148,9 +148,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
     const clusterNames = [...clusterMembers()];
     const edges = allEdges();
     const focusedCluster = resolveCluster(manualFocusCluster);
-    const focusedClusterNodes = focusedCluster
-      ? new Set(focusedCluster.nodes)
-      : null;
+    const focusedClusterNodes = focusedCluster ? new Set(focusedCluster.nodes) : null;
 
     pane.update({
       width,

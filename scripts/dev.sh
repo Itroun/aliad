@@ -17,7 +17,7 @@
 # After a frontend change just refresh the browser; the rebuild is automatic.
 # Stop everything with Ctrl-C.
 #
-# Usage:  npm run dev:local      (or:  bash scripts/dev.sh)
+# Usage:  npm run dev      (aliases: npm run dev:local, or: bash scripts/dev.sh)
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
