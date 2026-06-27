@@ -21,7 +21,6 @@ export function createGraphScreen({ lineup, onViewChange }) {
       <div class="topbar-right">
         <span class="progress-counter">000%</span>
         <div class="progress-bar"><div class="progress-fill"></div></div>
-        <span class="zoom-indicator">100%</span>
       </div>
     </header>
     <section class="graph-region"></section>
@@ -46,7 +45,6 @@ export function createGraphScreen({ lineup, onViewChange }) {
   const progressCounter = root.querySelector('.progress-counter');
   const progressFill = root.querySelector('.progress-fill');
   const progressBar = root.querySelector('.progress-bar');
-  const zoomIndicator = root.querySelector('.zoom-indicator');
   // The bar shimmers while the walk is still streaming — the "it's alive" signal,
   // visible no matter how slowly the honest fill advances.
   progressBar.classList.add('is-resolving');
@@ -68,10 +66,12 @@ export function createGraphScreen({ lineup, onViewChange }) {
     <span class="legend-item"><span class="legend-glyph is-group"></span>Group</span>
     <span class="legend-item"><span class="legend-glyph is-collab"></span>Collaboration</span>
     <span class="legend-sep"></span>
-    <button type="button" class="legend-fit" title="Fit graph to view">Fit &#x2b39;</button>
+    <span class="legend-zoom">100%</span>
+    <button type="button" class="legend-fit" title="Fit graph to view">Fit</button>
   `;
   graphRegion.append(legend);
   const fitBtn = legend.querySelector('.legend-fit');
+  const zoomIndicator = legend.querySelector('.legend-zoom');
 
   // Plain-language reassurance shown only when a run is projected to be slow (a
   // lineup we haven't looked up before takes far longer than a cached one).
@@ -374,10 +374,12 @@ export function createGraphScreen({ lineup, onViewChange }) {
 
   function finalize() {
     finalized = true;
-    progressCounter.textContent = '100%';
-    progressFill.style.width = '100%';
     progressBar.classList.remove('is-resolving');
     progressHint.classList.remove('is-visible');
+    // The streaming progress readout is transient — clear it from the top bar
+    // once the walk is done (the persistent zoom lives in the canvas legend).
+    progressCounter.hidden = true;
+    progressBar.hidden = true;
     // One settling pass to clear node↔foreign-edge intrusions left by the
     // box-only de-collision during streaming. Cancel any pending relayout so it
     // doesn't run a non-settle pass right after and undo the cleanup.

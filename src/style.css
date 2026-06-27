@@ -783,15 +783,6 @@ body > #app {
   animation: progress-shimmer 1.3s linear infinite;
 }
 
-/* zoom indicator (right edge of the map top bar) */
-.zoom-indicator {
-  font-family: var(--ff-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
 /* Slow-run reassurance: an inset note (✦ + italic serif) that fades in only
    when a run is projected to be slow. */
 .progress-hint {
@@ -1005,6 +996,14 @@ body > #app {
   width: 1px;
   height: 16px;
   background: var(--hairline-strong);
+}
+
+.legend-zoom {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .legend-fit {
