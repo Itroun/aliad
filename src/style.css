@@ -52,7 +52,7 @@
   --btn-glow: 0 6px 22px rgba(201, 168, 94, 0.25);
 
   /* edges */
-  --edge: rgba(201, 168, 94, 0.28);
+  --edge: rgba(201, 168, 94, 0.5);
   --edge-lit: var(--accent);
   --edge-dash: none;
 
@@ -92,7 +92,7 @@
   --btn-keyline: inset 0 0 0 1px rgba(241, 231, 205, 0.18);
   --btn-glow: 0 8px 24px rgba(29, 58, 92, 0.18);
 
-  --edge: rgba(29, 58, 92, 0.55);
+  --edge: rgba(29, 58, 92, 0.65);
   --edge-lit: #b23a2e;
   --edge-dash: 5 4;
 
