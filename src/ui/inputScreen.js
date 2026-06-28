@@ -1,4 +1,5 @@
 import { dedupeNames } from '../core/merge.js';
+import { classifyInput } from '../core/classifyInput.js';
 import { createViewTabs } from './viewTabs.js';
 import { mountThemeToggle } from './themeToggle.js';
 
@@ -23,6 +24,19 @@ const EXAMPLE_LINEUP = [
   'Growling Mad Scientists',
 ].join('\n');
 
+// Shown greyed in the empty field. Mixes plain names and a stage link so the one
+// field visibly invites both kinds of input at once. Imaginary acts/festival.
+const PLACEHOLDER = [
+  'Nova Drift',
+  'Cosmic Tide vs Aurora Veil',
+  'The Glass Orchard',
+  '',
+  'https://stellarfest.example/lineup',
+  'https://stellarfest.example/forest-stage',
+].join('\n');
+
+// Whole-line URLs past this point are dropped on submit (abuse / runaway-paste
+// guard). Plain lineup text is unaffected.
 const MAX_URLS = 10;
 
 export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
@@ -49,42 +63,31 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
         </div>
         <h1 class="input-title">Who&rsquo;s performing?</h1>
         <p class="input-lede">
-          Paste a festival lineup or link one from the web.
+          Paste a festival lineup or drop in a link &mdash; or both.
           <span class="lede-accent"> aliad </span>
           finds the other names each act performs under, so you can see who&rsquo;s playing more than once.
         </p>
       </div>
 
-      <label class="field field-textarea">
+      <label class="field field-paste">
         <div class="field-labelrow">
-          <span class="field-label">Paste a lineup</span>
+          <span class="field-label">Paste a lineup or link</span>
           ${showExample ? '<button type="button" class="link-btn example-btn">Try an example &darr;</button>' : ''}
         </div>
         <textarea class="lineup-input"
-          rows="10"
-          placeholder="One act per line."
+          rows="11"
+          placeholder="${PLACEHOLDER}"
         ></textarea>
-      </label>
-
-      <div class="divider-or">
-        <span class="divider-rule"></span>
-        <span class="divider-or-label">or</span>
-        <span class="divider-rule"></span>
-      </div>
-
-      <div class="field field-url">
-        <div class="field-labelrow">
-          <span class="field-label">Link to a lineup</span>
+        <div class="field-readout" hidden>
+          <span class="readout-icon" aria-hidden="true">&#x2726;</span>
+          <span class="readout-text"></span>
         </div>
-        <div class="url-list"></div>
-        <button type="button" class="link-btn url-add">+ Add another URL (merged together)</button>
-      </div>
+      </label>
 
       <div class="decode-row">
         <button type="button" class="decode-btn" disabled>
           <span class="decode-label">Map lineup</span><span class="decode-spinner" aria-hidden="true"></span>
         </button>
-        <span class="decode-counter"></span>
       </div>
 
       <div class="input-footer">
@@ -96,18 +99,17 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   `;
 
   const textarea = root.querySelector('.lineup-input');
-  const urlList = root.querySelector('.url-list');
-  const urlAdd = root.querySelector('.url-add');
   const decodeBtn = root.querySelector('.decode-btn');
   const decodeLabel = root.querySelector('.decode-label');
   const exampleBtn = root.querySelector('.example-btn');
-  const counter = root.querySelector('.decode-counter');
+  const readout = root.querySelector('.field-readout');
+  const readoutText = root.querySelector('.readout-text');
 
   let pastedHTML = null;
   let pasteFormat = null;
   let justPasted = false;
   // While resolving input (URL fetch + LLM extraction) the form is locked and the
-  // button becomes a live progress indicator. updateCounter() bails out so input
+  // button becomes a live progress indicator. updateReadout() bails out so input
   // events can't re-enable the button mid-flight.
   let busy = false;
 
@@ -124,7 +126,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
     root.classList.remove('is-busy');
     decodeBtn.classList.remove('is-busy');
     decodeLabel.textContent = 'Map lineup';
-    updateCounter(); // restore the enabled/disabled state from current input
+    updateReadout(); // restore the enabled/disabled state from current input
   }
 
   function clearPasteState() {
@@ -132,102 +134,33 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
     pasteFormat = null;
   }
 
-  // ---- URL rows (one per festival stage page; merged on submit) ----
-
-  function urlInputs() {
-    return [...urlList.querySelectorAll('.url-input')];
-  }
-
-  // Trimmed, non-empty, de-duplicated URLs in row order.
-  function collectUrls() {
-    const seen = new Set();
-    const urls = [];
-    for (const input of urlInputs()) {
-      const value = input.value.trim();
-      if (!value || seen.has(value)) continue;
-      seen.add(value);
-      urls.push(value);
-    }
-    return urls;
-  }
-
-  function syncRowChrome() {
-    const rows = [...urlList.querySelectorAll('.url-wrap')];
-    // The remove button is pointless when a single empty row is all there is.
-    const removable = rows.length > 1;
-    for (const row of rows) {
-      row.querySelector('.url-remove').hidden = !removable;
-    }
-    urlAdd.hidden = rows.length >= MAX_URLS;
-  }
-
-  // Stage-themed example URLs so successive rows hint that one page per stage
-  // is fine. Falls back to the last entry once we run past the named stages.
-  const URL_PLACEHOLDERS = [
-    'https://festival.example/mainstage-lineup',
-    'https://festival.example/sidestage-lineup',
-    'https://festival.example/tent-lineup',
-  ];
-
-  function addUrlRow(focus = false) {
-    if (urlList.querySelectorAll('.url-wrap').length >= MAX_URLS) return;
-    const index = urlList.querySelectorAll('.url-wrap').length;
-    const placeholder = URL_PLACEHOLDERS[Math.min(index, URL_PLACEHOLDERS.length - 1)];
-    const row = document.createElement('div');
-    row.className = 'url-wrap';
-    row.innerHTML = `
-      <span class="url-prefix">&#x2197;</span>
-      <input type="text" class="url-input" placeholder="${placeholder}" />
-      <button type="button" class="url-remove" aria-label="Remove URL">&times;</button>
-    `;
-    row.querySelector('.url-input').addEventListener('input', onUrlInput);
-    row.querySelector('.url-remove').addEventListener('click', () => removeUrlRow(row));
-    urlList.append(row);
-    syncRowChrome();
-    if (focus) row.querySelector('.url-input').focus();
-  }
-
-  function removeUrlRow(row) {
-    onCancel?.();
-    row.remove();
-    if (urlList.querySelectorAll('.url-wrap').length === 0) addUrlRow();
-    syncRowChrome();
-    updateCounter();
-  }
-
-  // Back to a single empty row (mutual exclusion: textarea wins).
-  function resetUrlRows() {
-    urlList.replaceChildren();
-    addUrlRow();
-  }
-
-  function onUrlInput() {
-    onCancel?.();
-    if (collectUrls().length) {
-      textarea.value = '';
-      clearPasteState();
-    }
-    updateCounter();
-  }
-
-  function updateCounter() {
+  // Live "what did we find" line under the field. Mirrors exactly what submit()
+  // will do, so the auto-detection never feels like a black box: links it will
+  // fetch, acts it will parse, or both.
+  function updateReadout() {
     if (busy) return; // locked while resolving — clearBusy() re-runs this after
-    const text = textarea.value.trim();
-    const urls = collectUrls();
-    const hasInput = Boolean(text || urls.length);
+    const { urls, actCount } = classifyInput(textarea.value);
+    const linkCount = Math.min(urls.length, MAX_URLS);
+    const hasInput = Boolean(linkCount || actCount);
     decodeBtn.disabled = !hasInput;
+
     if (!hasInput) {
-      counter.textContent = '';
+      readout.hidden = true;
+      readoutText.textContent = '';
       return;
     }
-    const lines = text ? text.split(/\n+/).filter(Boolean).length : 0;
-    const bits = [];
-    if (lines) bits.push(`${lines} line${lines === 1 ? '' : 's'}`);
-    if (urls.length) bits.push(`${urls.length} url${urls.length === 1 ? '' : 's'}`);
-    counter.textContent = bits.join(' · ');
+
+    readout.hidden = false;
+    readoutText.textContent = describe(linkCount, actCount);
   }
 
-  addUrlRow();
+  function describe(linkCount, actCount) {
+    const links = linkCount ? `${linkCount} link${linkCount === 1 ? '' : 's'}` : '';
+    const acts = actCount ? `${actCount} act${actCount === 1 ? '' : 's'}` : '';
+    if (links && acts) return `${links} + ${acts}`;
+    if (links) return `${links} — we’ll read the lineup off each page`;
+    return acts;
+  }
 
   textarea.addEventListener('paste', (event) => {
     onCancel?.();
@@ -246,31 +179,29 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
     onCancel?.();
     if (justPasted) justPasted = false;
     else clearPasteState();
-    if (textarea.value.trim()) resetUrlRows();
-    updateCounter();
+    updateReadout();
   });
-
-  urlAdd.addEventListener('click', () => addUrlRow(true));
 
   exampleBtn?.addEventListener('click', () => {
     textarea.value = EXAMPLE_LINEUP;
-    resetUrlRows();
     clearPasteState();
     pasteFormat = 'plain-text';
-    updateCounter();
+    updateReadout();
     textarea.focus();
   });
 
   decodeBtn.addEventListener('click', () => {
-    const urls = collectUrls();
-    const text = textarea.value.trim();
-    if (urls.length) {
-      onSubmit?.({ type: 'url', urls });
-    } else if (text && pastedHTML) {
-      onSubmit?.({ type: 'paste-html', value: text, html: pastedHTML, pasteFormat: 'html' });
-    } else if (text) {
-      onSubmit?.({ type: 'text', value: text, pasteFormat });
-    }
+    const { urls, text } = classifyInput(textarea.value);
+    const capped = urls.slice(0, MAX_URLS);
+    if (!capped.length && !text) return;
+    onSubmit?.({
+      urls: capped,
+      text,
+      // Rich-paste HTML only helps the text path; if every line was a URL there's
+      // no lineup text for it to enrich, so drop it.
+      html: text && pastedHTML ? pastedHTML : null,
+      pasteFormat,
+    });
   });
 
   const tabs = createViewTabs({ onChange: (v) => onViewChange?.(v) });

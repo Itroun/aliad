@@ -78,7 +78,7 @@ async function handleSubmit(input) {
   // (URL fetch + the LLM extraction) is the several-second gap before the map
   // appears, and otherwise looks like nothing is happening. URL submits start on
   // "Fetching…"; extract() below flips every path to "Reading…" once it runs.
-  inputScreen.setBusy(input.type === 'url' ? 'Fetching the lineup…' : 'Reading the lineup…');
+  inputScreen.setBusy(input.urls.length ? 'Fetching the lineup…' : 'Reading the lineup…');
 
   try {
     const { artists } = await resolveInput(input, signal);
@@ -182,20 +182,32 @@ function extract(content, type, signal) {
   });
 }
 
+// One field, possibly carrying both links and lineup text. Resolve each present
+// part in parallel — fetch+extract the URLs, parse the loose text — then merge
+// into one flat lineup (combineExtractions dedupes across the two). A "paste
+// anything" field that mixes a stage link with a few typed acts just works.
 async function resolveInput(input, signal) {
-  if (input.type === 'url') {
-    return resolveUrls(input.urls, signal);
-  }
+  const parts = [];
+  if (input.urls?.length) parts.push(resolveUrls(input.urls, signal));
+  if (input.text) parts.push(resolveTextPart(input, signal));
 
-  if (input.type === 'paste-html') {
+  if (!parts.length) return { artists: [] };
+
+  const resolved = await Promise.all(parts);
+  return combineExtractions(resolved);
+}
+
+// The text portion of a paste. Rich-paste HTML (a copied lineup table) extracts
+// far better than its flattened text, so prefer it when it survived cleaning;
+// otherwise fall back to plain-text detection + extraction.
+function resolveTextPart(input, signal) {
+  if (input.html) {
     const cleaned = cleanHTML(input.html);
-    if (cleaned.trim().length < 20) {
-      return resolveText(input.value, signal);
+    if (cleaned.trim().length >= 20) {
+      return extract(cleaned, 'html', signal);
     }
-    return extract(cleaned, 'html', signal);
   }
-
-  return resolveText(input.value, signal);
+  return resolveText(input.text, signal);
 }
 
 // Festivals often split their lineup across several pages (one per stage). Fetch

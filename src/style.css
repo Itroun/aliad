@@ -466,10 +466,6 @@ body > #app {
   margin-bottom: 26px;
 }
 
-.field-url {
-  margin-bottom: 34px;
-}
-
 .field-labelrow {
   display: flex;
   align-items: baseline;
@@ -502,8 +498,7 @@ body > #app {
   opacity: 0.75;
 }
 
-.lineup-input,
-.url-input {
+.lineup-input {
   display: block;
   width: 100%;
   padding: 15px 17px;
@@ -522,8 +517,7 @@ body > #app {
     box-shadow 0.14s ease;
 }
 
-.theme-dark .lineup-input,
-.theme-dark .url-input {
+.theme-dark .lineup-input {
   border-color: rgba(201, 168, 94, 0.5);
 }
 
@@ -532,91 +526,36 @@ body > #app {
   resize: vertical;
 }
 
-.lineup-input:focus,
-.url-input:focus {
+.lineup-input:focus {
   border-color: var(--accent);
   box-shadow:
     var(--btn-glow),
     inset 0 0 0 1px var(--accent);
 }
 
-.lineup-input::placeholder,
-.url-input::placeholder {
+.lineup-input::placeholder {
   color: var(--faint);
 }
 
-.url-wrap {
-  position: relative;
-}
-
-.url-wrap .url-input {
-  height: 46px;
-  padding: 0 44px 0 40px;
-}
-
-.url-prefix {
-  position: absolute;
-  left: 16px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 14px;
-  color: var(--accent);
-  pointer-events: none;
-}
-
-.url-list {
+/* Live "what did we find" line under the field: links to fetch / acts to parse. */
+.field-readout {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
-}
-
-/* Remove button wrapped to a real 34px hit target. */
-.url-remove {
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 34px;
-  height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-  color: var(--faint);
-  transition:
-    color 0.14s ease,
-    border-color 0.14s ease;
-}
-
-.url-remove:hover {
-  color: var(--accent);
-  border-color: var(--hairline);
-}
-
-.divider-or {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin: 6px 0 22px;
-}
-
-.divider-rule {
-  flex: 1;
-  height: 1px;
-  background: var(--hairline);
-}
-
-.divider-or-label {
+  margin-top: 12px;
   font-family: var(--ff-mono);
-  font-size: 10px;
-  letter-spacing: 0.18em;
-  color: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.field-readout[hidden] {
+  display: none;
+}
+
+.readout-icon {
+  font-size: 9px;
+  color: var(--accent);
 }
 
 .decode-row {
@@ -687,18 +626,10 @@ body > #app {
   display: inline-block;
 }
 
-.screen-input.is-busy .field,
-.screen-input.is-busy .divider-or {
+.screen-input.is-busy .field {
   opacity: 0.5;
   pointer-events: none;
   transition: opacity 0.2s ease;
-}
-
-.decode-counter {
-  font-family: var(--ff-mono);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  color: var(--muted);
 }
 
 /* Brand mark left, external link right — a small hairline-topped footer row. */

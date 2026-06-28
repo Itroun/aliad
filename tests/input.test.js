@@ -28,31 +28,41 @@ describe('createInputScreen', () => {
     return root;
   }
 
-  it('starts with the Decode button disabled', () => {
+  const setText = (value) => {
+    const ta = root.querySelector('.lineup-input');
+    ta.value = value;
+    ta.dispatchEvent(new Event('input'));
+    return ta;
+  };
+
+  it('starts with the Map button disabled and no readout', () => {
     mount();
     expect(root.querySelector('.decode-btn').disabled).toBe(true);
-    expect(root.querySelector('.decode-counter').textContent).toBe('');
+    expect(root.querySelector('.field-readout').hidden).toBe(true);
   });
 
-  it('enables Decode and shows a counter when text is entered', () => {
+  it('enables Map and reads out act count when text is entered', () => {
     mount();
-    const ta = root.querySelector('.lineup-input');
-    ta.value = 'Foo\nBar';
-    ta.dispatchEvent(new Event('input'));
+    setText('Foo\nBar');
     expect(root.querySelector('.decode-btn').disabled).toBe(false);
-    expect(root.querySelector('.decode-counter').textContent).toContain('2 lines');
+    expect(root.querySelector('.field-readout').hidden).toBe(false);
+    expect(root.querySelector('.readout-text').textContent).toContain('2 acts');
   });
 
-  it('enables Decode when a URL is entered', () => {
+  it('reads out link count when only URLs are entered', () => {
     mount();
-    const url = root.querySelector('.url-input');
-    url.value = 'https://example.com';
-    url.dispatchEvent(new Event('input'));
+    setText('https://example.com/lineup');
     expect(root.querySelector('.decode-btn').disabled).toBe(false);
-    expect(root.querySelector('.decode-counter').textContent).toContain('1 url');
+    expect(root.querySelector('.readout-text').textContent).toContain('1 link');
   });
 
-  it('"Try an example" fills the textarea and enables Decode', () => {
+  it('reads out a mix of links and acts', () => {
+    mount();
+    setText('Atmos\nhttps://example.com/lineup\nFilteria');
+    expect(root.querySelector('.readout-text').textContent).toBe('1 link + 2 acts');
+  });
+
+  it('"Try an example" fills the textarea and enables Map', () => {
     mount();
     root.querySelector('.example-btn').click();
     const ta = root.querySelector('.lineup-input');
@@ -60,93 +70,41 @@ describe('createInputScreen', () => {
     expect(root.querySelector('.decode-btn').disabled).toBe(false);
   });
 
-  it('submits a text payload on Decode click', () => {
+  it('submits a text-only payload on Map click', () => {
     const received = [];
     mount({ onSubmit: (p) => received.push(p) });
-    const ta = root.querySelector('.lineup-input');
-    ta.value = 'A\nB';
-    ta.dispatchEvent(new Event('input'));
+    setText('A\nB');
     root.querySelector('.decode-btn').click();
-    expect(received).toEqual([{ type: 'text', value: 'A\nB', pasteFormat: null }]);
+    expect(received).toEqual([{ urls: [], text: 'A\nB', html: null, pasteFormat: null }]);
   });
 
-  it('submits a url payload (array) when the URL field is set', () => {
+  it('submits a URL-only payload, dropping the dead html', () => {
     const received = [];
     mount({ onSubmit: (p) => received.push(p) });
-    const url = root.querySelector('.url-input');
-    url.value = 'https://example.com/lineup';
-    url.dispatchEvent(new Event('input'));
-    root.querySelector('.decode-btn').click();
-    expect(received).toEqual([{ type: 'url', urls: ['https://example.com/lineup'] }]);
-  });
-
-  it('clears the URL rows when text is typed', () => {
-    mount();
-    const ta = root.querySelector('.lineup-input');
-    const url = root.querySelector('.url-input');
-    url.value = 'https://example.com';
-    url.dispatchEvent(new Event('input'));
-    ta.value = 'A';
-    ta.dispatchEvent(new Event('input'));
-    // The whole row list resets to a single empty row.
-    expect(root.querySelectorAll('.url-input').length).toBe(1);
-    expect(root.querySelector('.url-input').value).toBe('');
-  });
-
-  it('adds and removes URL rows', () => {
-    mount();
-    expect(root.querySelectorAll('.url-wrap').length).toBe(1);
-    // Remove button is hidden while only one row exists.
-    expect(root.querySelector('.url-remove').hidden).toBe(true);
-
-    root.querySelector('.url-add').click();
-    expect(root.querySelectorAll('.url-wrap').length).toBe(2);
-    expect([...root.querySelectorAll('.url-remove')].every((b) => !b.hidden)).toBe(true);
-
-    root.querySelectorAll('.url-remove')[1].click();
-    expect(root.querySelectorAll('.url-wrap').length).toBe(1);
-    expect(root.querySelector('.url-remove').hidden).toBe(true);
-  });
-
-  it('caps URL rows at 10 and hides the add button at the cap', () => {
-    mount();
-    for (let i = 0; i < 20; i++) root.querySelector('.url-add').click();
-    expect(root.querySelectorAll('.url-wrap').length).toBe(10);
-    expect(root.querySelector('.url-add').hidden).toBe(true);
-  });
-
-  it('merges multiple URL rows into one payload and counts them', () => {
-    const received = [];
-    mount({ onSubmit: (p) => received.push(p) });
-    const setRow = (i, value) => {
-      const input = root.querySelectorAll('.url-input')[i];
-      input.value = value;
-      input.dispatchEvent(new Event('input'));
-    };
-    root.querySelector('.url-add').click();
-    setRow(0, 'https://fest.example/stage-1');
-    setRow(1, 'https://fest.example/stage-2');
-    expect(root.querySelector('.decode-counter').textContent).toContain('2 urls');
+    setText('https://example.com/lineup');
     root.querySelector('.decode-btn').click();
     expect(received).toEqual([
-      { type: 'url', urls: ['https://fest.example/stage-1', 'https://fest.example/stage-2'] },
+      { urls: ['https://example.com/lineup'], text: '', html: null, pasteFormat: null },
     ]);
   });
 
-  it('drops blank and duplicate URL rows from the payload', () => {
+  it('submits both links and text from one field, deduping URLs', () => {
     const received = [];
     mount({ onSubmit: (p) => received.push(p) });
-    const setRow = (i, value) => {
-      const input = root.querySelectorAll('.url-input')[i];
-      input.value = value;
-      input.dispatchEvent(new Event('input'));
-    };
-    root.querySelector('.url-add').click();
-    root.querySelector('.url-add').click();
-    setRow(0, 'https://fest.example/a');
-    setRow(1, '   ');
-    setRow(2, 'https://fest.example/a');
+    setText('Atmos\nhttps://fest.example/a\nFilteria\nhttps://fest.example/a');
     root.querySelector('.decode-btn').click();
-    expect(received).toEqual([{ type: 'url', urls: ['https://fest.example/a'] }]);
+    expect(received).toEqual([
+      { urls: ['https://fest.example/a'], text: 'Atmos\nFilteria', html: null, pasteFormat: null },
+    ]);
+  });
+
+  it('caps the submitted URLs at 10', () => {
+    const received = [];
+    mount({ onSubmit: (p) => received.push(p) });
+    const lines = Array.from({ length: 15 }, (_, i) => `https://fest.example/${i}`);
+    setText(lines.join('\n'));
+    expect(root.querySelector('.readout-text').textContent).toContain('10 links');
+    root.querySelector('.decode-btn').click();
+    expect(received[0].urls).toHaveLength(10);
   });
 });
