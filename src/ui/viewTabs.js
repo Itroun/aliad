@@ -4,6 +4,7 @@ export function createViewTabs({ onChange } = {}) {
   el.innerHTML = `
     <button type="button" class="view-tab" data-view="input">Lineup</button>
     <button type="button" class="view-tab" data-view="graph">Map</button>
+    <button type="button" class="view-tab" data-view="list">List</button>
   `;
 
   const buttons = [...el.querySelectorAll('.view-tab')];

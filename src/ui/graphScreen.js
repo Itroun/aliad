@@ -83,6 +83,32 @@ export function createGraphScreen({ lineup, onViewChange }) {
   const focusPanel = createFocusPanel();
   panelHost.append(focusPanel.el);
 
+  // ── Connections drawer (narrow / zoomed widths only) ───────────────
+  // At wide widths the detail panel is a fixed sidebar (CSS). Below the layout
+  // breakpoint it becomes a bottom sheet; this handle toggles it, and selecting
+  // a cluster auto-opens it so a tap reveals that cluster's evidence. The handle
+  // is CSS-hidden when the sidebar is shown, so it's inert on desktop.
+  const detailRegion = root.querySelector('.detail-region');
+  const drawerHandle = document.createElement('button');
+  drawerHandle.type = 'button';
+  drawerHandle.className = 'drawer-handle';
+  drawerHandle.setAttribute('aria-controls', 'graph-connections-panel');
+  detailRegion.id = 'graph-connections-panel';
+  detailRegion.prepend(drawerHandle);
+
+  let drawerOpen = false;
+  function syncDrawer() {
+    detailRegion.classList.toggle('is-open', drawerOpen);
+    drawerHandle.setAttribute('aria-expanded', String(drawerOpen));
+    drawerHandle.textContent = drawerOpen ? 'Connections ▾' : 'Connections ▴';
+  }
+  function setDrawer(open) {
+    drawerOpen = open;
+    syncDrawer();
+  }
+  drawerHandle.addEventListener('click', () => setDrawer(!drawerOpen));
+  syncDrawer();
+
   // The unconnected-acts list is collapsed by default — it's a long, low-value
   // list that otherwise crowds the panel. Clicking the header expands it.
   singletonToggle.addEventListener('click', () => {
@@ -106,6 +132,19 @@ export function createGraphScreen({ lineup, onViewChange }) {
   let hintShown = false;
 
   const layout = createLayout({ width: 100, height: 100 });
+
+  // Subscribers (e.g. the List view) notified whenever currentGraph changes, so
+  // a sibling view can re-render off the same source of truth without its own
+  // copy of the streamed results. Fired on every completion and at finalize.
+  const graphSubscribers = new Set();
+  function emitGraphChange() {
+    for (const cb of graphSubscribers) cb(currentGraph, lineup);
+  }
+  function onGraphChange(cb) {
+    graphSubscribers.add(cb);
+    cb(currentGraph, lineup); // prime with current state on subscribe
+    return () => graphSubscribers.delete(cb);
+  }
 
   // Resolve a focus key (a normalised member name) to the cluster that currently
   // contains it, or null if no longer present (e.g. it became a singleton).
@@ -172,6 +211,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
       focusedClusterNodes,
       onClusterClick: (name) => {
         manualFocusCluster = normaliseName(name);
+        setDrawer(true); // reveal the evidence on the bottom sheet (no-op when wide)
         render();
       },
     });
@@ -339,6 +379,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
     // A click on empty canvas (no drag) clears the selection back to the prompt.
     if (wasClick && manualFocusCluster) {
       manualFocusCluster = null;
+      setDrawer(false); // collapse the bottom sheet back down (no-op when wide)
       render();
     }
   };
@@ -366,6 +407,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
     currentGraph = buildGraph(completedResults);
     updateProgress();
     scheduleRelayout();
+    emitGraphChange();
   }
 
   function onArtistDone() {
@@ -389,6 +431,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
     }
     recomputeLayoutAndRender(true);
     renderSingletons();
+    emitGraphChange();
   }
 
   return {
@@ -396,6 +439,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
     onArtistComplete,
     onArtistDone,
     finalize,
+    onGraphChange,
     setActiveView: tabs.setActive,
   };
 }

@@ -3,6 +3,7 @@ import { initTheme } from './ui/themeToggle.js';
 import { createInputScreen } from './ui/inputScreen.js';
 import { createGraphScreen } from './ui/graphScreen.js';
 import { createEmptyGraphScreen } from './ui/emptyGraphScreen.js';
+import { createListScreen } from './ui/listScreen.js';
 import { createDevProbe } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
 import { detectInputType, extractArtists, combineExtractions } from './core/extract.js';
@@ -25,9 +26,11 @@ const inputScreen = createInputScreen({
   onViewChange: setView,
 });
 const emptyGraphScreen = createEmptyGraphScreen({ onViewChange: setView });
+const listScreen = createListScreen({ onViewChange: setView });
 
 app.append(inputScreen.el);
 app.append(emptyGraphScreen.el);
+app.append(listScreen.el);
 applyViewVisibility();
 
 bootFromHash();
@@ -40,7 +43,7 @@ function cancelActive() {
 }
 
 function setView(view) {
-  if (view !== 'input' && view !== 'graph') return;
+  if (view !== 'input' && view !== 'graph' && view !== 'list') return;
   activeView = view;
   applyViewVisibility();
 }
@@ -53,6 +56,9 @@ function applyViewVisibility() {
   if (graphScreen) graphScreen.el.hidden = activeView !== 'graph';
   graphScreen?.setActiveView?.(activeView);
   emptyGraphScreen.setActiveView(activeView);
+
+  listScreen.el.hidden = activeView !== 'list';
+  listScreen.setActiveView(activeView);
 }
 
 function replaceGraphScreen(next) {
@@ -63,6 +69,11 @@ function replaceGraphScreen(next) {
   if (next) {
     graphScreen = next;
     app.append(graphScreen.el);
+    // The List view renders off the same graph; subscribing primes it with the
+    // current (initially empty) state and keeps it in step as results stream.
+    graphScreen.onGraphChange((graph, lineup) => listScreen.update(graph, lineup));
+  } else {
+    listScreen.update({ clusters: [], singletons: [] }, []);
   }
   applyViewVisibility();
 }

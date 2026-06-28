@@ -1547,3 +1547,252 @@ body > #app {
 .dev-probe-detail.state-fail {
   color: #c66;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   Accessibility: zoom / reflow (WCAG 1.4.10) + the List/export view
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Input screen: scroll instead of clip ────────────────────────────
+   The shell is a fixed, viewport-sized box; at high browser zoom the box
+   shrinks with the viewport and its taller content must scroll rather than
+   be clipped. The input column is already built to grow (min-height flex +
+   footer auto-margin), so it just needs its own scroll. Graph stays locked. */
+.screen-input {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ── Graph screen: Connections drawer at narrow / zoomed widths ───────
+   Browser zoom is reported as a smaller CSS-px width, so one width query
+   covers both small windows and high zoom. The fixed 448px sidebar becomes a
+   bottom sheet that peeks a toggle handle and slides up when opened (or when a
+   cluster is selected). The 2-D graph itself keeps its own pan/zoom (1.4.10
+   exempts content needing two-dimensional layout). */
+.drawer-handle {
+  display: none; /* sidebar mode (wide): handle is inert */
+}
+
+@media (max-width: 760px) {
+  .screen-graph .graph-region {
+    right: 0; /* graph fills the full width */
+  }
+
+  .screen-graph .detail-region {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    height: auto;
+    max-height: 62vh;
+    border-left: none;
+    border-top: 1px solid var(--hairline);
+    /* Closed: slid down so only the handle peeks. Open: fully up. */
+    transform: translateY(calc(100% - 44px));
+    transition: transform 0.28s ease;
+    z-index: 40;
+  }
+
+  .screen-graph .detail-region.is-open {
+    transform: translateY(0);
+  }
+
+  .drawer-handle {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    height: 44px;
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--hairline);
+    cursor: pointer;
+    font-family: var(--ff-mono);
+    font-size: 11px;
+    letter-spacing: var(--label-ls);
+    color: var(--fg);
+  }
+
+  /* Lift the legend clear of the closed drawer's peeking handle (44px). When
+     the drawer opens it sits over the legend anyway, so hide it then — the
+     translucent sheet would otherwise ghost it through. */
+  .screen-graph .graph-legend {
+    bottom: 56px;
+  }
+  .screen-graph:has(.detail-region.is-open) .graph-legend {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* Keep the top bar from overflowing on a narrow row. */
+  .screen-graph .topbar {
+    padding: 0 14px;
+  }
+  .screen-graph .topbar-right .progress-bar {
+    width: 80px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-graph .detail-region {
+    transition: none;
+  }
+}
+
+/* ── List / export view ──────────────────────────────────────────────
+   The lineup results as scrollable, copy-pasteable text. Its own scroll
+   container, so it reflows naturally at any zoom. */
+.list-body {
+  position: absolute;
+  top: var(--topbar-h);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.list-scroll {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 36px 28px 72px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.list-copy {
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius);
+  padding: 7px 14px;
+  cursor: pointer;
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--body);
+  transition:
+    color 0.14s ease,
+    border-color 0.14s ease;
+}
+
+.list-copy:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+.list-copy.is-copied {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.list-section + .list-section {
+  margin-top: 44px;
+}
+
+.list-heading {
+  font-family: var(--ff-mono);
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 18px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.list-edge + .list-edge {
+  margin-top: 26px;
+}
+
+.list-edge-title {
+  font-family: var(--ff-serif);
+  font-weight: 700;
+  font-size: 19px;
+  line-height: 1.25;
+  color: var(--fg);
+  margin-bottom: 10px;
+}
+
+.list-edge-sep {
+  color: var(--muted);
+  margin: 0 8px;
+}
+
+.list-evidence-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.list-evidence {
+  padding: 7px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.list-evidence:first-child {
+  border-top: none;
+}
+
+.list-person {
+  font-family: var(--ff-serif);
+  font-size: 15px;
+  color: var(--accent);
+  margin-right: 10px;
+}
+
+.list-chain {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.list-chain .list-with {
+  color: var(--fg);
+}
+
+.list-chain .list-sep {
+  color: var(--faint);
+}
+
+.list-singletons {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 4px 18px;
+}
+
+.list-singletons li {
+  font-family: var(--ff-serif);
+  font-weight: 300;
+  font-size: 14px;
+  color: var(--muted);
+  padding: 3px 0;
+}
+
+.list-empty {
+  text-align: center;
+  padding: 12vh 0;
+}
+
+.list-empty-title {
+  font-family: var(--ff-display);
+  font-weight: 400;
+  font-size: 34px;
+  color: var(--fg);
+  margin: 0 0 12px;
+}
+
+.list-empty-msg {
+  font-family: var(--ff-serif);
+  font-size: 15px;
+  color: var(--muted);
+  max-width: 30em;
+  margin: 0 auto 24px;
+  line-height: 1.6;
+}
