@@ -113,17 +113,25 @@ export function createGraphPane() {
   function applyNav() {
     if (!nav.order.includes(nav.current)) nav.current = nav.order[0] ?? null;
     const navSet = new Set(nav.order);
+    // If a streamed merge demotes the focused representative (its cluster's
+    // nodes[0] changed), stripping its tabindex below would blur it and drop
+    // focus to <body>. Detect that and hand focus to the new current rep so
+    // keyboard nav survives relayouts. Only when WE caused the blur — never
+    // grab focus that was sitting elsewhere.
+    let blurredCurrent = false;
     for (const [name, el] of nodeEls) {
       if (navSet.has(name)) {
         el.setAttribute('role', 'button');
         el.setAttribute('aria-label', nav.labels.get(name) || name);
         el.tabIndex = name === nav.current ? 0 : -1;
       } else if (el.hasAttribute('role')) {
+        if (el === document.activeElement) blurredCurrent = true;
         el.removeAttribute('role');
         el.removeAttribute('aria-label');
         el.removeAttribute('tabindex');
       }
     }
+    if (blurredCurrent) nodeEls.get(nav.current)?.focus();
   }
 
   function edgeKey(a, b) {
