@@ -18,7 +18,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
       </div>
       <div class="topbar-tabs"></div>
       <div class="topbar-center"></div>
-      <div class="topbar-right">
+      <div class="topbar-right" role="status" aria-live="polite">
         <span class="progress-counter">000%</span>
         <div class="progress-bar"><div class="progress-fill"></div></div>
       </div>
@@ -66,12 +66,17 @@ export function createGraphScreen({ lineup, onViewChange }) {
     <span class="legend-item"><span class="legend-glyph is-group"></span>Group</span>
     <span class="legend-item"><span class="legend-glyph is-collab"></span>Collaboration</span>
     <span class="legend-sep"></span>
+    <button type="button" class="legend-zoom-btn" data-dir="out" aria-label="Zoom out" title="Zoom out">&minus;</button>
     <span class="legend-zoom">100%</span>
+    <button type="button" class="legend-zoom-btn" data-dir="in" aria-label="Zoom in" title="Zoom in">+</button>
     <button type="button" class="legend-fit" title="Fit graph to view">Fit</button>
   `;
-  graphRegion.append(legend);
+  root.append(legend);
   const fitBtn = legend.querySelector('.legend-fit');
   const zoomIndicator = legend.querySelector('.legend-zoom');
+  legend.querySelectorAll('.legend-zoom-btn').forEach((btn) => {
+    btn.addEventListener('click', () => zoomBy(btn.dataset.dir === 'in' ? 1.25 : 1 / 1.25));
+  });
 
   // Plain-language reassurance shown only when a run is projected to be slow (a
   // lineup we haven't looked up before takes far longer than a cached one).
@@ -194,12 +199,70 @@ export function createGraphScreen({ lineup, onViewChange }) {
   // changes (edge clicks): the sim is warm-started and not at equilibrium, so
   // resuming it on every click would drift clusters around until it settles —
   // a focus change must not move the graph.
+  // Select a cluster by one of its member names: focus it (dim the rest), reveal
+  // its evidence. `pan` brings it into view — wanted for keyboard nav (the target
+  // may be off-screen) but not for a mouse click on an already-visible node.
+  function selectCluster(name, { pan = false } = {}) {
+    manualFocusCluster = normaliseName(name);
+    setDrawer(true); // reveal the evidence on the bottom sheet (no-op when wide)
+    if (pan) panClusterIntoView(resolveCluster(manualFocusCluster));
+    render();
+  }
+
+  function clearSelection() {
+    if (!manualFocusCluster) return;
+    manualFocusCluster = null;
+    setDrawer(false);
+    render();
+  }
+
+  // Pan (no zoom change) so the cluster's centroid sits in the pane, but only if
+  // it's currently outside a comfortable margin — keyboard nav shouldn't yank the
+  // view when the target is already on screen.
+  function panClusterIntoView(cluster) {
+    if (!cluster) return;
+    const pts = cluster.nodes.map((n) => lastPositions.get(n)).filter(Boolean);
+    if (!pts.length) return;
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const { width, height } = paneDims();
+    const sx = cx * viewport.k + viewport.tx;
+    const sy = cy * viewport.k + viewport.ty;
+    const margin = 80;
+    if (sx >= margin && sx <= width - margin && sy >= margin && sy <= height - margin) return;
+    viewport = { ...viewport, tx: width / 2 - cx * viewport.k, ty: height / 2 - cy * viewport.k };
+    autoFit = false;
+    applyViewport(true); // smooth glide to the centred cluster
+  }
+
+  // Zoom about the pane centre (keyboard / button zoom has no pointer anchor).
+  function zoomBy(factor) {
+    const { width, height } = paneDims();
+    viewport = zoomAtPoint(viewport, width / 2, height / 2, factor);
+    autoFit = false;
+    applyViewport(true);
+  }
+
   function render() {
     const { width, height } = paneDims();
     const clusterNames = [...clusterMembers()];
     const edges = allEdges();
     const focusedCluster = resolveCluster(manualFocusCluster);
     const focusedClusterNodes = focusedCluster ? new Set(focusedCluster.nodes) : null;
+
+    // One representative node per cluster is the keyboard tab stop; its label
+    // names the cluster + size for screen readers.
+    const navOrder = [];
+    const ariaLabels = new Map();
+    for (const c of currentGraph.clusters) {
+      const rep = c.nodes[0];
+      if (!rep) continue;
+      navOrder.push(rep);
+      const count = c.nodes.length;
+      ariaLabels.set(rep, `${rep}, cluster of ${count} connected act${count === 1 ? '' : 's'}`);
+    }
 
     pane.update({
       width,
@@ -209,10 +272,21 @@ export function createGraphScreen({ lineup, onViewChange }) {
       positions: lastPositions,
       kinds: currentGraph.kinds,
       focusedClusterNodes,
-      onClusterClick: (name) => {
-        manualFocusCluster = normaliseName(name);
-        setDrawer(true); // reveal the evidence on the bottom sheet (no-op when wide)
-        render();
+      navOrder,
+      ariaLabels,
+      onClusterClick: (name) => selectCluster(name, { pan: false }),
+      onClusterFocus: (name) => selectCluster(name, { pan: true }),
+      onClearFocus: clearSelection,
+      onZoomIn: () => zoomBy(1.25),
+      onZoomOut: () => zoomBy(1 / 1.25),
+      onFit: () => {
+        autoFit = true;
+        fitToContent(true);
+      },
+      onPan: (dx, dy) => {
+        viewport = { ...viewport, tx: viewport.tx + dx, ty: viewport.ty + dy };
+        autoFit = false;
+        applyViewport(false); // instant step pan, matching wheel/drag
       },
     });
     focusPanel.update(focusedCluster);
@@ -275,6 +349,8 @@ export function createGraphScreen({ lineup, onViewChange }) {
     const total = Math.max(1, lineup.length);
     const pct = Math.round((completed / total) * 100);
     progressCounter.textContent = `${String(pct).padStart(3, '0')}%`;
+    // Spoken form for the aria-live region — the bare "045%" glyph isn't meaningful.
+    progressCounter.setAttribute('aria-label', `${pct}% of lineup resolved`);
     progressFill.style.width = `${pct}%`;
 
     // Project the remaining time from the observed completion rate; if it's going
@@ -377,11 +453,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
     pane.el.classList.remove('is-panning');
     pane.el.releasePointerCapture?.(e.pointerId);
     // A click on empty canvas (no drag) clears the selection back to the prompt.
-    if (wasClick && manualFocusCluster) {
-      manualFocusCluster = null;
-      setDrawer(false); // collapse the bottom sheet back down (no-op when wide)
-      render();
-    }
+    if (wasClick) clearSelection();
   };
   pane.el.addEventListener('pointerup', endPan);
   pane.el.addEventListener('pointercancel', endPan);

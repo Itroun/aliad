@@ -37,6 +37,95 @@ export function createGraphPane() {
   const targetPos = new Map(); // name → { x, y } (latest layout result)
   let rafId = null;
 
+  // ── Keyboard navigation state ──────────────────────────────────────
+  // Cluster-by-cluster nav: one representative node per cluster is focusable
+  // (roving tabindex), arrows move between them, Enter/Space selects, Esc clears.
+  // `cb` holds the latest behaviour callbacks (refreshed every update so node
+  // listeners never go stale); `nav` holds the focusable order + current target.
+  const cb = {};
+  const nav = { order: [], labels: new Map(), current: null };
+
+  // One delegated keydown handler for the whole pane. Zoom/fit work whenever
+  // focus is inside the graph; arrow/select/clear act on the focused nav node.
+  root.addEventListener('keydown', (e) => {
+    if (e.key === '+' || e.key === '=') return void (cb.onZoomIn?.(), e.preventDefault());
+    if (e.key === '-' || e.key === '_') return void (cb.onZoomOut?.(), e.preventDefault());
+    if (e.key === '0') return void (cb.onFit?.(), e.preventDefault());
+
+    const active = document.activeElement;
+    const name = active && nav.order.includes(active.dataset?.name) ? active.dataset.name : null;
+    if (name == null) return;
+
+    if (e.shiftKey) {
+      const PAN = 60;
+      const d = {
+        ArrowLeft: [PAN, 0],
+        ArrowRight: [-PAN, 0],
+        ArrowUp: [0, PAN],
+        ArrowDown: [0, -PAN],
+      }[e.key];
+      if (!d) return;
+      cb.onPan?.(d[0], d[1]);
+      e.preventDefault();
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        moveNav(1);
+        e.preventDefault();
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        moveNav(-1);
+        e.preventDefault();
+        break;
+      case 'Enter':
+      case ' ':
+        cb.onClusterFocus?.(name);
+        e.preventDefault();
+        break;
+      case 'Escape':
+        cb.onClearFocus?.();
+        e.preventDefault();
+        break;
+    }
+  });
+
+  // Move the roving focus `dir` clusters along (wrapping), then select it so the
+  // panel + dimming follow focus and the cluster pans into view.
+  function moveNav(dir) {
+    if (!nav.order.length) return;
+    const idx = nav.order.indexOf(nav.current);
+    const start = idx < 0 ? 0 : idx;
+    nav.current = nav.order[(start + dir + nav.order.length) % nav.order.length];
+    applyNav();
+    nodeEls.get(nav.current)?.focus();
+    cb.onClusterFocus?.(nav.current);
+  }
+
+  // Re-apply roving tabindex + button semantics. One representative holds
+  // tabindex 0 (the tab stop); the rest get -1. A node that stops being a
+  // representative (cluster merges) drops its nav semantics. Crucially we never
+  // removeAttribute('tabindex') on a node that stays a representative — doing so
+  // blurs it if it's the focused element. Setting .tabIndex = -1 keeps focus.
+  function applyNav() {
+    if (!nav.order.includes(nav.current)) nav.current = nav.order[0] ?? null;
+    const navSet = new Set(nav.order);
+    for (const [name, el] of nodeEls) {
+      if (navSet.has(name)) {
+        el.setAttribute('role', 'button');
+        el.setAttribute('aria-label', nav.labels.get(name) || name);
+        el.tabIndex = name === nav.current ? 0 : -1;
+      } else if (el.hasAttribute('role')) {
+        el.removeAttribute('role');
+        el.removeAttribute('aria-label');
+        el.removeAttribute('tabindex');
+      }
+    }
+  }
+
   function edgeKey(a, b) {
     return `${a}||${b}`;
   }
@@ -49,8 +138,26 @@ export function createGraphPane() {
     positions,
     kinds,
     focusedClusterNodes,
+    navOrder,
+    ariaLabels,
     onClusterClick,
+    onClusterFocus,
+    onClearFocus,
+    onZoomIn,
+    onZoomOut,
+    onFit,
+    onPan,
   }) {
+    // Refresh behaviour callbacks so the once-bound listeners stay current.
+    Object.assign(cb, {
+      onClusterClick,
+      onClusterFocus,
+      onClearFocus,
+      onZoomIn,
+      onZoomOut,
+      onFit,
+      onPan,
+    });
     svg.setAttribute('width', width);
     svg.setAttribute('height', height);
     // When a cluster is focused, everything outside it recedes. Null/empty set
@@ -72,7 +179,7 @@ export function createGraphPane() {
           <line class="edge-line" stroke-linecap="round"></line>
           <g class="edge-ticks"></g>
         `;
-        g.addEventListener('click', () => onClusterClick?.(edge.a));
+        g.addEventListener('click', () => cb.onClusterClick?.(edge.a));
         edgeVp.append(g);
         edgeEls.set(key, g);
       }
@@ -107,7 +214,8 @@ export function createGraphPane() {
         // all at once (capped so a big first batch doesn't drag).
         el.style.setProperty('--enter-delay', `${Math.min(newCount * 35, 280)}ms`);
         newCount++;
-        el.addEventListener('click', () => onClusterClick?.(name));
+        el.dataset.name = name; // reverse lookup for keyboard nav
+        el.addEventListener('click', () => cb.onClusterClick?.(name));
         nodesLayer.append(el);
         nodeEls.set(name, el);
         // A new node appears AT its target (then fades/pops in), not gliding in.
@@ -135,6 +243,11 @@ export function createGraphPane() {
         targetPos.delete(name);
       }
     }
+
+    // ── Keyboard nav: refresh focusable order + roving tabindex. ────────
+    nav.order = navOrder || [];
+    nav.labels = ariaLabels || new Map();
+    applyNav();
 
     applyAll();
     ensureAnimating();
@@ -237,6 +350,9 @@ export function createGraphPane() {
     edgeData.clear();
     renderedPos.clear();
     targetPos.clear();
+    nav.order = [];
+    nav.labels = new Map();
+    nav.current = null;
   }
 
   return { el: root, update, clear, setTransform };

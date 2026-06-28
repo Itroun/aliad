@@ -853,7 +853,12 @@ body > #app {
 /* Legend chip pinned bottom-right of the canvas: node vocabulary + Fit. */
 .graph-legend {
   position: absolute;
-  right: 16px;
+  /* Pinned to the screen (not the graph-region) so it can't be swept along with
+     the canvas's accelerated pan/zoom layer — a Chromium compositing quirk that
+     dragged it off-screen when it lived inside the transformed subtree. Offset
+     left of the fixed sidebar to sit at the graph area's bottom-right; the narrow
+     breakpoint resets it to 16px once the sidebar becomes a bottom sheet. */
+  right: calc(var(--inspector-w) + 16px);
   bottom: 16px;
   z-index: 4;
   display: flex;
@@ -960,6 +965,11 @@ body > #app {
   letter-spacing: 0.04em;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  /* Fixed width + centred so the readout swinging between 3 and 4 glyphs
+     ("90%" ↔ "250%") never reflows the right-anchored legend. */
+  display: inline-block;
+  min-width: 5ch;
+  text-align: center;
 }
 
 .legend-fit {
@@ -976,6 +986,47 @@ body > #app {
 
 .legend-fit:hover {
   opacity: 0.7;
+}
+
+.legend-zoom-btn {
+  background: transparent;
+  border: none;
+  padding: 0 2px;
+  cursor: pointer;
+  font-family: var(--ff-mono);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--accent);
+  transition: opacity 0.14s ease;
+}
+
+.legend-zoom-btn:hover {
+  opacity: 0.7;
+}
+
+/* ── Focus indicators ────────────────────────────────────────────────
+   Keyboard focus must be visible everywhere — the UA default outline is
+   near-invisible against the custom-coloured controls. A single :focus-visible
+   ring (pointer clicks stay ring-free via :focus-visible, not :focus). */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Graph nodes are 0×0 anchors, so ring the visible dot (and brighten the label)
+   rather than the empty box. */
+.graph-node:focus-visible {
+  outline: none;
+}
+
+.graph-node:focus-visible .node-dot {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.graph-node:focus-visible .node-label {
+  color: var(--accent-bright);
 }
 
 /* ── Graph nodes ─────────────────────────────────────────────────── */
@@ -1618,6 +1669,7 @@ body > #app {
      the drawer opens it sits over the legend anyway, so hide it then — the
      translucent sheet would otherwise ghost it through. */
   .screen-graph .graph-legend {
+    right: 16px; /* sidebar is now a bottom sheet; graph spans full width */
     bottom: 56px;
   }
   .screen-graph:has(.detail-region.is-open) .graph-legend {
