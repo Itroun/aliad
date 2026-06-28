@@ -70,10 +70,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
       </div>
 
       <label class="field field-paste">
-        <div class="field-labelrow">
-          <span class="field-label">Paste a lineup or link</span>
-          ${showExample ? '<button type="button" class="link-btn example-btn">Try an example &darr;</button>' : ''}
-        </div>
+        ${showExample ? '<div class="field-labelrow"><button type="button" class="link-btn example-btn">Try an example &darr;</button></div>' : ''}
         <textarea class="lineup-input"
           rows="11"
           placeholder="${PLACEHOLDER}"
@@ -104,6 +101,16 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   const exampleBtn = root.querySelector('.example-btn');
   const readout = root.querySelector('.field-readout');
   const readoutText = root.querySelector('.readout-text');
+
+  // Match the column beneath the hero (paste field, button row, footer rule) to
+  // the rendered width of the "Who's performing?" title. The title scales with
+  // the viewport, so re-measure when it resizes and publish it as --field-w.
+  const inputTitle = root.querySelector('.input-title');
+  const syncFieldWidth = () => {
+    const w = inputTitle.getBoundingClientRect().width;
+    if (w) root.style.setProperty('--field-w', `${Math.round(w)}px`);
+  };
+  new ResizeObserver(syncFieldWidth).observe(inputTitle);
 
   let pastedHTML = null;
   let pasteFormat = null;
