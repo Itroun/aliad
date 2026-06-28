@@ -8,6 +8,13 @@ describe('parseLineup', () => {
     expect(parseLineup(text)).toEqual(['Infected Mushroom', 'Shpongle', 'Aphex Twin']);
   });
 
+  it('collapses punctuation/spacing variants of one act to a single entry', () => {
+    // Reader-mode extractions often list the same act several ways; these are
+    // one identity and must dedupe to the first spelling seen.
+    const text = 'Ree K\nRee.K\nRee-K\nDOMINO vs Ree-K';
+    expect(parseLineup(text)).toEqual(['Ree K', 'DOMINO vs Ree-K']);
+  });
+
   it('returns an empty array for blank input', () => {
     expect(parseLineup('')).toEqual([]);
     expect(parseLineup('   \n\n  ')).toEqual([]);

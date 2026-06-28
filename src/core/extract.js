@@ -92,8 +92,9 @@ export async function extractArtists(content, { type, signal, fetchFn = fetch, o
 
 // Merge the artist lists from several extractions (e.g. one festival lineup page
 // per stage) into one flat, de-duplicated lineup. `dedupeNames` is the same
-// case-insensitive, trim-aware primitive `parseLineup` uses, so a name appearing
-// on two pages collapses to one node downstream.
+// identity-normalised, trim-aware primitive `parseLineup` uses, so a name
+// appearing on two pages (even spelled with different punctuation) collapses to
+// one node downstream.
 export function combineExtractions(lists) {
   const names = (lists ?? []).flatMap((r) => (Array.isArray(r?.artists) ? r.artists : []));
   return { artists: dedupeNames(names) };

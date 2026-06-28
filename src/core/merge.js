@@ -8,8 +8,12 @@ export function dedupeNames(names) {
   for (const raw of names ?? []) {
     const trimmed = String(raw ?? '').trim();
     if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
-    if (seen.has(key)) continue;
+    // Key on the canonical identity, not a bare lowercase: punctuation/spacing
+    // variants of one act ("Ree K" / "Ree.K" / "Ree-K") — common in reader-mode
+    // extractions that list an act several ways — must collapse to a single
+    // lineup entry, matching how normaliseName keys identity everywhere else.
+    const key = normaliseName(trimmed);
+    if (!key || seen.has(key)) continue;
     seen.add(key);
     out.push(trimmed);
   }
