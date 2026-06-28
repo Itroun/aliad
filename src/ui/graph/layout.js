@@ -393,6 +393,17 @@ function contentBounds(groups, pos, side) {
 function placeOne(existing, r, width, height, gap) {
   const cx = width / 2;
   const cy = height / 2;
+  // Pack into an ELLIPTICAL field whose aspect matches the (landscape) pane, so
+  // the overall blob comes out wide rather than circular and the viewport's Fit
+  // can use the horizontal space instead of leaving big left/right margins. We
+  // stretch the sample ring on x and compress on y by √aspect (area-preserving),
+  // so the content bbox aspect ≈ width/height. The overlap test below stays
+  // CIRCULAR, so the minimum inter-cluster gap is identical in every direction —
+  // only the macro-shape changes, neighbour spacing is untouched. Aspect is
+  // clamped so an extreme window can't string clusters into a thin line.
+  const aspect = Math.min(Math.max(width / height || 1, 1), 2.2);
+  const ax = Math.sqrt(aspect);
+  const ay = 1 / ax;
   // Reach well past the pane: layout lives in unbounded world space and the
   // viewport reframes, so a new cluster may legitimately land far out.
   const maxR = Math.hypot(width, height) + r * 6;
@@ -401,8 +412,8 @@ function placeOne(existing, r, width, height, gap) {
     const samples = ring === 0 ? 1 : Math.max(8, Math.ceil((2 * Math.PI * ring) / step));
     for (let s = 0; s < samples; s++) {
       const a = (s / samples) * 2 * Math.PI;
-      const x = cx + Math.cos(a) * ring;
-      const y = cy + Math.sin(a) * ring;
+      const x = cx + Math.cos(a) * ring * ax;
+      const y = cy + Math.sin(a) * ring * ay;
       let ok = true;
       for (const p of existing) {
         if (Math.hypot(x - p.centre.x, y - p.centre.y) < r + p.radius + gap) {
