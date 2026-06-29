@@ -113,10 +113,16 @@ body {
   background: var(--bg);
   color: var(--body);
   font-family: var(--ff-serif);
-  font-size: 14px;
   line-height: 1.5;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Base reading size. Left in rem (not px) so it tracks the user's browser font
+   preference; 0.875rem = 14px at the default 16px root, so default rendering is
+   unchanged. All component font-sizes are likewise rem (value÷16) — WCAG 1.4.4. */
+body {
+  font-size: 0.875rem;
 }
 
 #app,
@@ -211,7 +217,7 @@ body > #app {
 
 .wordmark-logo {
   font-family: var(--ff-display);
-  font-size: 30px;
+  font-size: 1.875rem;
   letter-spacing: 0.2px;
   line-height: 1;
   color: var(--fg);
@@ -238,7 +244,7 @@ body > #app {
   padding: 7px 15px;
   cursor: pointer;
   font-family: var(--ff-mono);
-  font-size: 12px;
+  font-size: 0.75rem;
   letter-spacing: var(--label-ls);
   color: var(--muted);
   transition:
@@ -264,6 +270,21 @@ body > #app {
   color: #0c1433;
 }
 
+/* Focus: these segmented tabs sit in an overflow:hidden container that clips the
+   global (offset) outline. A solid edge ring reads as a border, so use a thin
+   DOTTED line set well inside the tab (negative offset draws inside the box, so
+   it isn't clipped) — distinctly a focus marker, not a faux border. Accent on the
+   transparent inactive tabs; the label colour on the --accent-filled active tab
+   (currentColor is high-contrast on the fill in both themes). */
+.view-tab:focus-visible {
+  outline: 2px dotted var(--accent-bright);
+  outline-offset: -4px;
+}
+
+.view-tab.is-active:focus-visible {
+  outline-color: currentColor;
+}
+
 /* Theme toggle — quiet icon button on the far right of every top bar. */
 .theme-toggle {
   margin-left: auto;
@@ -276,7 +297,7 @@ body > #app {
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
   color: var(--muted);
-  font-size: 14px;
+  font-size: 0.875rem;
   cursor: pointer;
   transition:
     color 0.14s ease,
@@ -351,7 +372,7 @@ body > #app {
 
 .empty-graph-eyebrow {
   font-family: var(--ff-mono);
-  font-size: 10px;
+  font-size: 0.625rem;
   letter-spacing: 0.16em;
   color: var(--accent);
   margin-bottom: 16px;
@@ -359,7 +380,7 @@ body > #app {
 
 .empty-graph-title {
   font-family: var(--ff-display);
-  font-size: 56px;
+  font-size: 3.5rem;
   line-height: 1;
   white-space: nowrap;
   color: var(--fg);
@@ -383,7 +404,7 @@ body > #app {
 .empty-graph-msg {
   font-family: var(--ff-serif);
   font-weight: 300;
-  font-size: 16px;
+  font-size: 1rem;
   line-height: 1.6;
   color: var(--muted);
   margin: 0 0 28px;
@@ -442,7 +463,7 @@ body > #app {
 }
 
 .hero-stars .star {
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .hero-stars .rule {
@@ -469,7 +490,7 @@ body > #app {
 .input-lede {
   font-family: var(--ff-serif);
   font-weight: 300;
-  font-size: 17px;
+  font-size: 1.0625rem;
   line-height: 1.6;
   color: var(--body);
   margin: 0 auto;
@@ -510,7 +531,7 @@ body > #app {
   padding: 0;
   cursor: pointer;
   font-family: var(--ff-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
   letter-spacing: 0.04em;
   color: var(--accent);
   text-decoration: underline;
@@ -533,7 +554,7 @@ body > #app {
   outline: none;
   font-family: var(--ff-mono);
   font-weight: 400;
-  font-size: 13px;
+  font-size: 0.8125rem;
   letter-spacing: 0.01em;
   line-height: 1.7;
   transition:
@@ -568,7 +589,7 @@ body > #app {
   gap: 8px;
   margin-top: 12px;
   font-family: var(--ff-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
   letter-spacing: 0.04em;
   color: var(--muted);
 }
@@ -578,7 +599,7 @@ body > #app {
 }
 
 .readout-icon {
-  font-size: 9px;
+  font-size: 0.5625rem;
   color: var(--accent);
 }
 
@@ -598,7 +619,7 @@ body > #app {
   border: none;
   color: var(--btn-fg);
   font-family: var(--ff-mono);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: 0.05em;
   cursor: pointer;
@@ -671,13 +692,13 @@ body > #app {
 
 .footer-mark {
   font-family: var(--ff-display);
-  font-size: 17px;
+  font-size: 1.0625rem;
   color: var(--muted);
 }
 
 .footer-link {
   font-family: var(--ff-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
   letter-spacing: 0.04em;
   color: var(--muted);
   text-decoration: none;
@@ -703,7 +724,7 @@ body > #app {
 
 .progress-counter {
   font-family: var(--ff-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--muted);
   letter-spacing: 0.08em;
   font-variant-numeric: tabular-nums;
@@ -751,7 +772,7 @@ body > #app {
   font-family: var(--ff-serif);
   font-style: italic;
   font-weight: 300;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--body);
   background: var(--panel-fill);
   border: 1px solid var(--hairline-strong);
@@ -870,7 +891,7 @@ body > #app {
   border-radius: var(--radius);
   backdrop-filter: blur(8px);
   font-family: var(--ff-mono);
-  font-size: 10px;
+  font-size: 0.625rem;
   letter-spacing: 0.04em;
   color: var(--muted);
 }
@@ -961,7 +982,7 @@ body > #app {
 
 .legend-zoom {
   font-family: var(--ff-mono);
-  font-size: 10px;
+  font-size: 0.625rem;
   letter-spacing: 0.04em;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -978,7 +999,7 @@ body > #app {
   padding: 0;
   cursor: pointer;
   font-family: var(--ff-mono);
-  font-size: 10px;
+  font-size: 0.625rem;
   letter-spacing: 0.06em;
   color: var(--accent);
   transition: opacity 0.14s ease;
@@ -994,7 +1015,7 @@ body > #app {
   padding: 0 2px;
   cursor: pointer;
   font-family: var(--ff-mono);
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1;
   color: var(--accent);
   transition: opacity 0.14s ease;
@@ -1014,19 +1035,12 @@ body > #app {
   border-radius: 2px;
 }
 
-/* Graph nodes are 0×0 anchors, so ring the visible dot (and brighten the label)
-   rather than the empty box. */
+/* Graph nodes have no separate focus ring: selection follows focus (see the
+   focusin handler in graph/render.js), so the cluster-selection styling —
+   brightening the focused cluster, dimming the rest — IS the focus indicator.
+   Suppress the global ring on the 0×0 anchor box so it doesn't show a stray dot. */
 .graph-node:focus-visible {
   outline: none;
-}
-
-.graph-node:focus-visible .node-dot {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-
-.graph-node:focus-visible .node-label {
-  color: var(--accent-bright);
 }
 
 /* ── Graph nodes ─────────────────────────────────────────────────── */
@@ -1142,7 +1156,7 @@ body > #app {
   white-space: nowrap;
   font-family: var(--ff-serif);
   font-weight: 400;
-  font-size: 14px;
+  font-size: 0.875rem;
   letter-spacing: 0.1px;
   color: var(--fg);
   cursor: pointer;
@@ -1153,7 +1167,7 @@ body > #app {
 
 /* Collaboration acts ("X vs Y") get a slightly larger, emphasised label. */
 .node-kind-collab .node-label {
-  font-size: 15px;
+  font-size: 0.9375rem;
   color: var(--fg);
 }
 
@@ -1226,14 +1240,14 @@ body > #app {
 
 .panel-eyebrow {
   font-family: var(--ff-mono);
-  font-size: 10px;
+  font-size: 0.625rem;
   letter-spacing: 0.16em;
   color: var(--muted);
   margin-bottom: 14px;
 }
 
 .panel-singletons .panel-eyebrow {
-  font-size: 9px;
+  font-size: 0.5625rem;
   margin-bottom: 0;
 }
 
@@ -1269,7 +1283,7 @@ body > #app {
   font-family: var(--ff-serif);
   font-style: italic;
   font-weight: 300;
-  font-size: 16px;
+  font-size: 1rem;
   color: var(--muted);
   line-height: 1.6;
 }
@@ -1283,7 +1297,7 @@ body > #app {
 .connection-title {
   font-family: var(--ff-serif);
   font-weight: 700;
-  font-size: 20px;
+  font-size: 1.25rem;
   line-height: 1.2;
   color: var(--fg);
   margin-bottom: 16px;
@@ -1304,7 +1318,7 @@ body > #app {
   border: none;
   cursor: pointer;
   font-family: var(--ff-mono);
-  font-size: 10px;
+  font-size: 0.625rem;
   letter-spacing: 0.1em;
   color: var(--muted);
   transition: color 0.14s ease;
@@ -1345,7 +1359,7 @@ body > #app {
 
 .evidence-idx {
   font-family: var(--ff-mono);
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--faint);
   padding-top: 3px;
   min-width: 18px;
@@ -1359,14 +1373,14 @@ body > #app {
 
 .evidence-person {
   font-family: var(--ff-serif);
-  font-size: 15px;
+  font-size: 0.9375rem;
   color: var(--accent);
   margin-bottom: 3px;
 }
 
 .evidence-hops {
   font-family: var(--ff-mono);
-  font-size: 10.5px;
+  font-size: 0.65625rem;
   letter-spacing: 0.02em;
   line-height: 1.6;
   color: var(--muted);
@@ -1408,7 +1422,7 @@ body > #app {
   padding: 3px 0;
   font-family: var(--ff-serif);
   font-weight: 300;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--faint);
   opacity: 0.55;
   transition:
@@ -1546,7 +1560,7 @@ body > #app {
   border-radius: var(--radius);
   backdrop-filter: blur(8px);
   font-family: var(--ff-mono);
-  font-size: 10px;
+  font-size: 0.625rem;
   color: var(--muted);
   z-index: 100;
 }
@@ -1557,7 +1571,7 @@ body > #app {
 
 .dev-probe h3 {
   font-family: var(--ff-mono);
-  font-size: 9px;
+  font-size: 0.5625rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted);
@@ -1660,7 +1674,7 @@ body > #app {
     border-bottom: 1px solid var(--hairline);
     cursor: pointer;
     font-family: var(--ff-mono);
-    font-size: 11px;
+    font-size: 0.6875rem;
     letter-spacing: var(--label-ls);
     color: var(--fg);
   }
@@ -1721,7 +1735,7 @@ body > #app {
   padding: 7px 14px;
   cursor: pointer;
   font-family: var(--ff-mono);
-  font-size: 10px;
+  font-size: 0.625rem;
   letter-spacing: 0.12em;
   color: var(--body);
   transition:
@@ -1746,7 +1760,7 @@ body > #app {
 .list-heading {
   font-family: var(--ff-mono);
   font-weight: 400;
-  font-size: 11px;
+  font-size: 0.6875rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--muted);
@@ -1762,7 +1776,7 @@ body > #app {
 .list-edge-title {
   font-family: var(--ff-serif);
   font-weight: 700;
-  font-size: 19px;
+  font-size: 1.1875rem;
   line-height: 1.25;
   color: var(--fg);
   margin-bottom: 10px;
@@ -1790,14 +1804,14 @@ body > #app {
 
 .list-person {
   font-family: var(--ff-serif);
-  font-size: 15px;
+  font-size: 0.9375rem;
   color: var(--accent);
   margin-right: 10px;
 }
 
 .list-chain {
   font-family: var(--ff-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
   letter-spacing: 0.02em;
   color: var(--muted);
 }
@@ -1822,7 +1836,7 @@ body > #app {
 .list-singletons li {
   font-family: var(--ff-serif);
   font-weight: 300;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--muted);
   padding: 3px 0;
 }
@@ -1835,14 +1849,14 @@ body > #app {
 .list-empty-title {
   font-family: var(--ff-display);
   font-weight: 400;
-  font-size: 34px;
+  font-size: 2.125rem;
   color: var(--fg);
   margin: 0 0 12px;
 }
 
 .list-empty-msg {
   font-family: var(--ff-serif);
-  font-size: 15px;
+  font-size: 0.9375rem;
   color: var(--muted);
   max-width: 30em;
   margin: 0 auto 24px;

@@ -45,6 +45,15 @@ export function createGraphPane() {
   const cb = {};
   const nav = { order: [], labels: new Map(), current: null };
 
+  // Selection follows focus: tabbing or clicking onto a cluster's representative
+  // selects it (no pan — only arrows pan). The cluster-selection styling is then
+  // the focus indicator, so graph nodes need no separate focus ring (see the
+  // focus section in style.css). Reuses onClusterClick (the no-pan select path).
+  root.addEventListener('focusin', (e) => {
+    const name = e.target?.dataset?.name;
+    if (name && nav.order.includes(name)) cb.onClusterClick?.(name);
+  });
+
   // One delegated keydown handler for the whole pane. Zoom/fit work whenever
   // focus is inside the graph; arrow/select/clear act on the focused nav node.
   root.addEventListener('keydown', (e) => {
@@ -88,6 +97,7 @@ export function createGraphPane() {
         break;
       case 'Escape':
         cb.onClearFocus?.();
+        active.blur(); // drop focus off the now-deselected node so focus is never unindicated
         e.preventDefault();
         break;
     }
@@ -101,8 +111,10 @@ export function createGraphPane() {
     const start = idx < 0 ? 0 : idx;
     nav.current = nav.order[(start + dir + nav.order.length) % nav.order.length];
     applyNav();
-    nodeEls.get(nav.current)?.focus();
+    // Select (+pan) before moving DOM focus: the focusin handler then sees the
+    // cluster already selected and no-ops, so each arrow step renders once.
     cb.onClusterFocus?.(nav.current);
+    nodeEls.get(nav.current)?.focus();
   }
 
   // Re-apply roving tabindex + button semantics. One representative holds

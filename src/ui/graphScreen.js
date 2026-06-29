@@ -203,7 +203,12 @@ export function createGraphScreen({ lineup, onViewChange }) {
   // its evidence. `pan` brings it into view — wanted for keyboard nav (the target
   // may be off-screen) but not for a mouse click on an already-visible node.
   function selectCluster(name, { pan = false } = {}) {
-    manualFocusCluster = normaliseName(name);
+    const key = normaliseName(name);
+    // Selection follows focus, so focusin re-fires this for the already-selected
+    // cluster on every arrow step — skip the redundant work, but always honour a
+    // pan request (Enter/arrows re-centre even when the selection is unchanged).
+    if (key === manualFocusCluster && !pan) return;
+    manualFocusCluster = key;
     setDrawer(true); // reveal the evidence on the bottom sheet (no-op when wide)
     if (pan) panClusterIntoView(resolveCluster(manualFocusCluster));
     render();
