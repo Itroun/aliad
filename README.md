@@ -40,7 +40,7 @@ Worker, so for the full app you need the wrangler stack:
 ```bash
 # .dev.vars (gitignored)
 DISCOGS_TOKEN=your-discogs-personal-token
-ANTHROPIC_API_KEY=sk-ant-...        # only needed for the extraction layer
+OPENROUTER_API_KEY=sk-or-...        # only needed for the extraction layer
 
 npm run build:dev
 npx wrangler dev                    # full stack on http://localhost:8787

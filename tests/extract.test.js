@@ -6,8 +6,12 @@ import {
   looksUnderExtracted,
   combineExtractions,
 } from '../src/core/extract.js';
-import messy from './fixtures/anthropic-extract-messy-text.json';
-import html from './fixtures/anthropic-extract-html.json';
+import messy from './fixtures/openrouter-extract-messy-text.json';
+import html from './fixtures/openrouter-extract-html.json';
+import { PRIMARY, FALLBACK } from '../src/core/models.js';
+
+// Build an OpenRouter chat-completions response wrapping a model's raw text.
+const orResponse = (text) => ({ choices: [{ message: { role: 'assistant', content: text } }] });
 
 describe('detectInputType', () => {
   it('returns clean for one-per-line input', () => {
@@ -40,31 +44,43 @@ describe('detectInputType', () => {
 });
 
 describe('callLLM', () => {
-  it('parses a valid Anthropic response', async () => {
+  it('parses a valid OpenRouter response', async () => {
     const fetchFn = async () => new Response(JSON.stringify(messy));
     const result = await callLLM(
       {
         system: 'test',
         messages: [{ role: 'user', content: 'test' }],
-        model: 'claude-haiku-4-5-20251001',
+        model: PRIMARY,
       },
       { fetchFn },
     );
     expect(result.artists).toContain('Shpongle');
   });
 
-  it('handles markdown-fenced JSON in response', async () => {
-    const fenced = {
-      content: [
-        { type: 'text', text: '```json\n{"artists":["Test"],"discoveredAliases":[]}\n```' },
-      ],
+  it('sends the system prompt as a leading message', async () => {
+    let sent;
+    const fetchFn = async (_url, opts) => {
+      sent = JSON.parse(opts.body);
+      return new Response(JSON.stringify(orResponse('{"artists":["X"]}')));
     };
+    await callLLM(
+      { system: 'SYS', messages: [{ role: 'user', content: 'U' }], model: PRIMARY },
+      { fetchFn },
+    );
+    expect(sent.messages).toEqual([
+      { role: 'system', content: 'SYS' },
+      { role: 'user', content: 'U' },
+    ]);
+  });
+
+  it('handles markdown-fenced JSON in response', async () => {
+    const fenced = orResponse('```json\n{"artists":["Test"],"discoveredAliases":[]}\n```');
     const fetchFn = async () => new Response(JSON.stringify(fenced));
     const result = await callLLM(
       {
         system: 'test',
         messages: [{ role: 'user', content: 'test' }],
-        model: 'claude-haiku-4-5-20251001',
+        model: PRIMARY,
       },
       { fetchFn },
     );
@@ -78,7 +94,7 @@ describe('callLLM', () => {
         {
           system: 'test',
           messages: [{ role: 'user', content: 'test' }],
-          model: 'claude-haiku-4-5-20251001',
+          model: PRIMARY,
         },
         { fetchFn },
       ),
@@ -157,42 +173,31 @@ describe('extractArtists', () => {
     expect(result.artists).toContain('Dado vs Dino Psaras');
   });
 
-  it('falls back to Sonnet when Haiku returns suspiciously few artists for a large input', async () => {
+  it('falls back to the stronger model when the primary returns suspiciously few artists for a large input', async () => {
     const calls = [];
-    const haikuResponse = {
-      content: [{ type: 'text', text: '{"artists":["One","Two"],"discoveredAliases":[]}' }],
-    };
-    const sonnetResponse = {
-      content: [
-        {
-          type: 'text',
-          text: '{"artists":["A","B","C","D","E","F","G","H"],"discoveredAliases":[]}',
-        },
-      ],
-    };
+    const primaryResponse = orResponse('{"artists":["One","Two"],"discoveredAliases":[]}');
+    const fallbackResponse = orResponse(
+      '{"artists":["A","B","C","D","E","F","G","H"],"discoveredAliases":[]}',
+    );
     const fetchFn = async (_url, opts) => {
       const body = JSON.parse(opts.body);
       calls.push(body.model);
-      if (body.model.includes('haiku')) return new Response(JSON.stringify(haikuResponse));
-      return new Response(JSON.stringify(sonnetResponse));
+      if (body.model === PRIMARY) return new Response(JSON.stringify(primaryResponse));
+      return new Response(JSON.stringify(fallbackResponse));
     };
     const bigInput = 'x'.repeat(5000);
     const result = await extractArtists(bigInput, { type: 'html', fetchFn });
-    expect(calls).toEqual(['claude-haiku-4-5', 'claude-sonnet-4-6']);
+    expect(calls).toEqual([PRIMARY, FALLBACK]);
     expect(result.artists).toHaveLength(8);
   });
 
-  it('keeps Haiku result when Sonnet returns fewer artists on fallback', async () => {
-    const haikuResponse = {
-      content: [{ type: 'text', text: '{"artists":["One","Two"],"discoveredAliases":[]}' }],
-    };
-    const sonnetResponse = {
-      content: [{ type: 'text', text: '{"artists":["Only"],"discoveredAliases":[]}' }],
-    };
+  it('keeps the primary result when the fallback returns fewer artists', async () => {
+    const primaryResponse = orResponse('{"artists":["One","Two"],"discoveredAliases":[]}');
+    const fallbackResponse = orResponse('{"artists":["Only"],"discoveredAliases":[]}');
     const fetchFn = async (_url, opts) => {
       const body = JSON.parse(opts.body);
-      if (body.model.includes('haiku')) return new Response(JSON.stringify(haikuResponse));
-      return new Response(JSON.stringify(sonnetResponse));
+      if (body.model === PRIMARY) return new Response(JSON.stringify(primaryResponse));
+      return new Response(JSON.stringify(fallbackResponse));
     };
     const bigInput = 'x'.repeat(5000);
     const result = await extractArtists(bigInput, { type: 'html', fetchFn });
@@ -201,33 +206,27 @@ describe('extractArtists', () => {
 
   it('does not fall back for small inputs even with few artists', async () => {
     const calls = [];
-    const haikuResponse = {
-      content: [{ type: 'text', text: '{"artists":["One","Two"],"discoveredAliases":[]}' }],
-    };
+    const primaryResponse = orResponse('{"artists":["One","Two"],"discoveredAliases":[]}');
     const fetchFn = async (_url, opts) => {
       calls.push(JSON.parse(opts.body).model);
-      return new Response(JSON.stringify(haikuResponse));
+      return new Response(JSON.stringify(primaryResponse));
     };
     await extractArtists('short lineup text', { type: 'messy-text', fetchFn });
-    expect(calls).toEqual(['claude-haiku-4-5']);
+    expect(calls).toEqual([PRIMARY]);
   });
 
-  it('falls back to Sonnet when Haiku returns empty', async () => {
+  it('falls back to the stronger model when the primary returns empty', async () => {
     const calls = [];
-    const emptyResponse = {
-      content: [{ type: 'text', text: '{"artists":[],"discoveredAliases":[]}' }],
-    };
-    const sonnetResponse = {
-      content: [{ type: 'text', text: '{"artists":["Found"],"discoveredAliases":[]}' }],
-    };
+    const emptyResponse = orResponse('{"artists":[],"discoveredAliases":[]}');
+    const fallbackResponse = orResponse('{"artists":["Found"],"discoveredAliases":[]}');
     const fetchFn = async (_url, opts) => {
       const body = JSON.parse(opts.body);
       calls.push(body.model);
-      if (body.model.includes('haiku')) return new Response(JSON.stringify(emptyResponse));
-      return new Response(JSON.stringify(sonnetResponse));
+      if (body.model === PRIMARY) return new Response(JSON.stringify(emptyResponse));
+      return new Response(JSON.stringify(fallbackResponse));
     };
     const result = await extractArtists('some messy content here', { type: 'messy-text', fetchFn });
-    expect(calls).toEqual(['claude-haiku-4-5', 'claude-sonnet-4-6']);
+    expect(calls).toEqual([PRIMARY, FALLBACK]);
     expect(result.artists).toEqual(['Found']);
   });
 });

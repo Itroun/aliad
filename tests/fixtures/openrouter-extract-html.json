@@ -1,0 +1,19 @@
+{
+  "_note": "Synthesised OpenRouter chat-completions response for HTML page extraction with rich alias info",
+  "id": "msg_test_002",
+  "model": "mistralai/mistral-nemo",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"artists\":[\"Dado vs Dino Psaras\",\"Electric Universe\",\"Astrix\"],\"discoveredAliases\":[{\"artist\":\"Dado vs Dino Psaras\",\"aliases\":[\"Deedrah\",\"Transwave\",\"Cydonia\"]},{\"artist\":\"Electric Universe\",\"aliases\":[\"Boris Blenn\"]}]}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 500,
+    "completion_tokens": 120
+  }
+}

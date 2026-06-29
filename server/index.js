@@ -12,7 +12,7 @@
 
 import { handle as lookup } from './api/lookup.js';
 import { handle as closure } from './api/closure.js';
-import { handle as anthropic } from './api/anthropic.js';
+import { handle as openrouter } from './api/openrouter.js';
 import { handle as fetchPage } from './api/fetch-page.js';
 import { checkOrigin } from './_lib/originCheck.js';
 
@@ -23,7 +23,7 @@ export { RateLimiter } from './rateLimiter.js';
 const ROUTES = {
   '/api/lookup': lookup,
   '/api/closure': closure,
-  '/api/anthropic': anthropic,
+  '/api/openrouter': openrouter,
   '/api/fetch-page': fetchPage,
 };
 

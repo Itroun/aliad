@@ -11,16 +11,16 @@ journey.
 ```
 Input ─▶ Extraction ─▶ Closure walk (server) ─▶ Graph view
  │          │                │                      │
- paste/     Claude via       /api/closure SSE,      identity graph +
- URL/file   /api/anthropic   one stream per act     connections panel
+ paste/     LLM via          /api/closure SSE,      identity graph +
+ URL/file   /api/openrouter  one stream per act     connections panel
             (messy input     (+ per collab part)
             only)
 ```
 
 1. **Input** (`src/ui/inputScreen.js`). Paste text, a URL, or a flyer/PDF/image.
 2. **Extraction** (`src/core/extract.js`). Clean line-per-artist text passes
-   through untouched; anything messier is sent to Claude through the
-   `/api/anthropic` proxy, which returns a clean list + any alias hints. URLs are
+   through untouched; anything messier is sent to an LLM through the
+   `/api/openrouter` proxy, which returns a clean list + any alias hints. URLs are
    fetched server-side via `/api/fetch-page` (SSRF-guarded), HTML pre-cleaned by
    `src/core/cleanHTML.js`.
 3. **Lookup + closure** (`src/core/lookup.js` → `/api/closure`). `lookupAll` is a
@@ -62,7 +62,7 @@ server/                  Cloudflare Workers app (not Pages)
 ├── api/
 │   ├── lookup.js        search+pick+details+map; reads/writes the D1 quad cache
 │   ├── closure.js       drives the walk per node, streams progress as SSE
-│   ├── anthropic.js     Claude proxy (key injection, rate + daily-ceiling caps)
+│   ├── openrouter.js    LLM proxy via OpenRouter (key injection, rate + daily-ceiling caps)
 │   └── fetch-page.js    URL fetch proxy (SSRF guard, challenge sniffing)
 ├── rateLimiter.js       RateLimiter Durable Object (global Discogs token bucket)
 └── _lib/                binding adapters: quadStore (D1), kvLimit (KV),

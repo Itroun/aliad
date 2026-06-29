@@ -1,8 +1,8 @@
 import { parseLineup } from '../ui/inputScreen.js';
 import { dedupeNames } from './merge.js';
-import { HAIKU, SONNET } from './models.js';
+import { PRIMARY, FALLBACK } from './models.js';
 
-const SYSTEM_PROMPT_TEXT = `You extract artist and performer names from text related to music festivals or events.
+export const SYSTEM_PROMPT_TEXT = `You extract artist and performer names from text related to music festivals or events.
 
 Return a JSON object with:
 - "artists": array of artist/performer name strings
@@ -14,7 +14,7 @@ Rules:
 - If a name appears in different forms, pick the most complete version
 - Return valid JSON only, no markdown fencing`;
 
-const SYSTEM_PROMPT_HTML = `You extract artist and performer names from text scraped from a music festival or event webpage.
+export const SYSTEM_PROMPT_HTML = `You extract artist and performer names from text scraped from a music festival or event webpage.
 
 Return a JSON object with:
 - "artists": array of artist/performer name strings
@@ -63,7 +63,7 @@ export async function extractArtists(content, { type, signal, fetchFn = fetch, o
   const messages = [{ role: 'user', content: trimmed }];
 
   let result = await timedCall(
-    HAIKU,
+    PRIMARY,
     systemPrompt,
     messages,
     { signal, fetchFn },
@@ -72,17 +72,17 @@ export async function extractArtists(content, { type, signal, fetchFn = fetch, o
   );
 
   if (looksUnderExtracted(result.artists, trimmed.length)) {
-    const sonnetResult = await timedCall(
-      SONNET,
+    const fallbackResult = await timedCall(
+      FALLBACK,
       systemPrompt,
       messages,
       { signal, fetchFn },
       onCall,
       trimmed.length,
     );
-    const sonnetCount = Array.isArray(sonnetResult.artists) ? sonnetResult.artists.length : 0;
-    const haikuCount = Array.isArray(result.artists) ? result.artists.length : 0;
-    if (sonnetCount >= haikuCount) result = sonnetResult;
+    const fallbackCount = Array.isArray(fallbackResult.artists) ? fallbackResult.artists.length : 0;
+    const primaryCount = Array.isArray(result.artists) ? result.artists.length : 0;
+    if (fallbackCount >= primaryCount) result = fallbackResult;
   }
 
   return {
@@ -121,11 +121,18 @@ async function timedCall(model, system, messages, { signal, fetchFn }, onCall, i
 }
 
 export async function callLLM({ system, messages, model }, { signal, fetchFn = fetch }) {
-  const response = await fetchFn('/api/anthropic', {
+  // OpenRouter uses the OpenAI chat-completions shape: the system prompt is a
+  // leading message (not a top-level `system` field), and the reply text lives
+  // at choices[0].message.content (not Anthropic's content[0].text).
+  const response = await fetchFn('/api/openrouter', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     signal,
-    body: JSON.stringify({ model, max_tokens: 4096, system, messages }),
+    body: JSON.stringify({
+      model,
+      max_tokens: 4096,
+      messages: [{ role: 'system', content: system }, ...messages],
+    }),
   });
 
   if (!response.ok) {
@@ -134,7 +141,7 @@ export async function callLLM({ system, messages, model }, { signal, fetchFn = f
   }
 
   const data = await response.json();
-  const raw = data?.content?.[0]?.text ?? '';
+  const raw = data?.choices?.[0]?.message?.content ?? '';
 
   return parseJSON(raw);
 }

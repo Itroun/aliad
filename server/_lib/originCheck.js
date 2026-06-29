@@ -1,13 +1,13 @@
 // Origin/Referer allowlist for the /api/* endpoints. Without this, once the app
 // is publicly reachable anyone's browser JS could call our proxies and spend our
-// Anthropic budget / Discogs quota for free.
+// OpenRouter budget / Discogs quota for free.
 //
 // Threat model: the vector an origin check actually defends is *another site's
 // page calling our endpoints from a browser* — a cross-origin fetch always
 // carries an `Origin` (and same-origin browser fetches carry at least a
 // `Referer`). A bare server-side script (curl/node) can omit or spoof every
 // header, so origin checks can't stop it; that's what the per-IP rate limits and
-// the Anthropic daily ceiling are for. So we reject a request whose origin is
+// the OpenRouter daily ceiling are for. So we reject a request whose origin is
 // present and NOT allowlisted, and let a header-less request through rather than
 // create false positives against odd legit clients.
 //

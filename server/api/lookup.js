@@ -12,7 +12,7 @@
 // byte-identical to before — only the backing store changed — so the browser
 // walker and provider contract are untouched. This lays the shared, queryable
 // substrate for Phase 3 (server-side closure queries). KV stays, but now only
-// for rate limiting + the Anthropic ceiling. See ARCHITECTURE.md.
+// for rate limiting + the OpenRouter ceiling. See ARCHITECTURE.md.
 
 import { checkRateLimit } from '../_lib/kvLimit.js';
 import { awaitDiscogsSlot } from '../_lib/rateGate.js';

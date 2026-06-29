@@ -1,13 +1,15 @@
 import { checkRateLimit, checkDailyCeiling, incrementDailyCeiling } from '../_lib/kvLimit.js';
 import { ALLOWED_MODELS } from '../../src/core/models.js';
 
-const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
-const ANTHROPIC_VERSION = '2023-06-01';
+// OpenAI-compatible chat-completions endpoint. The client sends an already
+// OpenRouter-shaped body (model + messages incl. a system message); we inject
+// the key, enforce the model allowlist, cap max_tokens, and per-IP rate-limit.
+const OPENROUTER_API = 'https://openrouter.ai/api/v1/chat/completions';
 const MAX_TOKENS_CAP = 4096;
 const RATE_LIMIT = 20;
 const RATE_WINDOW_SEC = 60;
 const DEFAULT_DAILY_REQUEST_LIMIT = 300;
-const DAILY_COUNTER_KEY = 'anthropic:usage';
+const DAILY_COUNTER_KEY = 'openrouter:usage';
 
 export async function handle(context) {
   const { request, env } = context;
@@ -19,7 +21,7 @@ export async function handle(context) {
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
 
   const rate = await checkRateLimit(env, {
-    scope: 'anthropic',
+    scope: 'openrouter',
     ip,
     limit: RATE_LIMIT,
     windowSec: RATE_WINDOW_SEC,
@@ -28,14 +30,14 @@ export async function handle(context) {
     return new Response('Too many requests', { status: 429 });
   }
 
-  const dailyLimit = Number(env.ANTHROPIC_DAILY_REQUEST_LIMIT) || DEFAULT_DAILY_REQUEST_LIMIT;
+  const dailyLimit = Number(env.OPENROUTER_DAILY_REQUEST_LIMIT) || DEFAULT_DAILY_REQUEST_LIMIT;
   const ceiling = await checkDailyCeiling(env, { key: DAILY_COUNTER_KEY, limit: dailyLimit });
   if (!ceiling.allowed) {
     return new Response('Daily request budget exhausted', { status: 503 });
   }
 
-  if (!env.ANTHROPIC_API_KEY) {
-    return new Response('Anthropic API key not configured', { status: 500 });
+  if (!env.OPENROUTER_API_KEY) {
+    return new Response('OpenRouter API key not configured', { status: 500 });
   }
 
   let body;
@@ -57,12 +59,14 @@ export async function handle(context) {
 
   body.max_tokens = Math.min(body.max_tokens ?? MAX_TOKENS_CAP, MAX_TOKENS_CAP);
 
-  const upstream = await fetch(ANTHROPIC_API, {
+  const upstream = await fetch(OPENROUTER_API, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': env.ANTHROPIC_API_KEY,
-      'anthropic-version': ANTHROPIC_VERSION,
+      Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+      // OpenRouter attribution headers — surfaced on their dashboard / rankings.
+      'HTTP-Referer': env.OPENROUTER_REFERER || 'https://aliad.app',
+      'X-Title': 'aliad',
     },
     body: JSON.stringify(body),
   });
