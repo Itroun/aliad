@@ -14,6 +14,25 @@ Rules:
 - If a name appears in different forms, pick the most complete version
 - Return valid JSON only, no markdown fencing`;
 
+// Force the reply into { artists: string[] }. Without this, larger/noisier pages
+// pushed mistral-nemo into a prose preamble + markdown fence and, worse, echoing
+// a {name,url} object per artist — bloating output past max_tokens so the JSON
+// truncated and parsing threw (silently dropping the page). A strict schema keeps
+// it to a flat string array, which both fixes the shape and stops the bloat.
+export const ARTIST_SCHEMA = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'artist_list',
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: { artists: { type: 'array', items: { type: 'string' } } },
+      required: ['artists'],
+      additionalProperties: false,
+    },
+  },
+};
+
 export const SYSTEM_PROMPT_HTML = `You extract artist and performer names from text scraped from a music festival or event webpage.
 
 Return a JSON object with:
@@ -62,31 +81,49 @@ export async function extractArtists(content, { type, signal, fetchFn = fetch, o
   const trimmed = content.trim();
   const messages = [{ role: 'user', content: trimmed }];
 
-  let result = await timedCall(
-    PRIMARY,
-    systemPrompt,
-    messages,
-    { signal, fetchFn },
-    onCall,
-    trimmed.length,
-  );
-
-  if (looksUnderExtracted(result.artists, trimmed.length)) {
-    const fallbackResult = await timedCall(
-      FALLBACK,
+  // The primary can fail outright — a noisy page makes it truncate past
+  // max_tokens, leaving unparseable JSON that throws here. Treat that the same as
+  // a weak result: retry with the stronger model rather than dropping the page
+  // (the caller skips a thrown extraction). Only when BOTH fail do we propagate.
+  let result = null;
+  let primaryFailed = false;
+  try {
+    result = await timedCall(
+      PRIMARY,
       systemPrompt,
       messages,
       { signal, fetchFn },
       onCall,
       trimmed.length,
     );
-    const fallbackCount = Array.isArray(fallbackResult.artists) ? fallbackResult.artists.length : 0;
-    const primaryCount = Array.isArray(result.artists) ? result.artists.length : 0;
-    if (fallbackCount >= primaryCount) result = fallbackResult;
+  } catch (err) {
+    if (isAbort(err, signal)) throw err;
+    primaryFailed = true;
+  }
+
+  const primaryCount = Array.isArray(result?.artists) ? result.artists.length : 0;
+  if (primaryFailed || looksUnderExtracted(result?.artists, trimmed.length)) {
+    try {
+      const fallbackResult = await timedCall(
+        FALLBACK,
+        systemPrompt,
+        messages,
+        { signal, fetchFn },
+        onCall,
+        trimmed.length,
+      );
+      const fallbackCount = Array.isArray(fallbackResult.artists)
+        ? fallbackResult.artists.length
+        : 0;
+      if (primaryFailed || fallbackCount >= primaryCount) result = fallbackResult;
+    } catch (err) {
+      if (isAbort(err, signal) || primaryFailed) throw err;
+      // Fallback failed but the primary succeeded — keep the primary result.
+    }
   }
 
   return {
-    artists: Array.isArray(result.artists) ? result.artists : [],
+    artists: Array.isArray(result?.artists) ? result.artists : [],
   };
 }
 
@@ -98,6 +135,11 @@ export async function extractArtists(content, { type, signal, fetchFn = fetch, o
 export function combineExtractions(lists) {
   const names = (lists ?? []).flatMap((r) => (Array.isArray(r?.artists) ? r.artists : []));
   return { artists: dedupeNames(names) };
+}
+
+// A user-cancelled run must propagate immediately, never be retried/swallowed.
+function isAbort(err, signal) {
+  return err?.name === 'AbortError' || !!signal?.aborted;
 }
 
 export function looksUnderExtracted(artists, inputChars) {
@@ -131,6 +173,7 @@ export async function callLLM({ system, messages, model }, { signal, fetchFn = f
     body: JSON.stringify({
       model,
       max_tokens: 4096,
+      response_format: ARTIST_SCHEMA,
       messages: [{ role: 'system', content: system }, ...messages],
     }),
   });

@@ -215,6 +215,41 @@ describe('extractArtists', () => {
     expect(calls).toEqual([PRIMARY]);
   });
 
+  it('falls back to the stronger model when the primary throws (truncated/unparseable)', async () => {
+    const calls = [];
+    const fallbackResponse = orResponse('{"artists":["Recovered"]}');
+    const fetchFn = async (_url, opts) => {
+      const body = JSON.parse(opts.body);
+      calls.push(body.model);
+      // Primary returns truncated JSON (as a real max_tokens cutoff would) → parse throws.
+      if (body.model === PRIMARY)
+        return new Response(JSON.stringify(orResponse('{"artists":["A","B"')));
+      return new Response(JSON.stringify(fallbackResponse));
+    };
+    const result = await extractArtists('x'.repeat(5000), { type: 'html', fetchFn });
+    expect(calls).toEqual([PRIMARY, FALLBACK]);
+    expect(result.artists).toEqual(['Recovered']);
+  });
+
+  it('propagates when both models fail', async () => {
+    const fetchFn = async () => new Response(JSON.stringify(orResponse('not json at all')));
+    await expect(extractArtists('x'.repeat(5000), { type: 'html', fetchFn })).rejects.toThrow(
+      /parse/i,
+    );
+  });
+
+  it('keeps the primary result when the fallback throws', async () => {
+    const fetchFn = async (_url, opts) => {
+      const body = JSON.parse(opts.body);
+      // Primary under-extracts (triggers fallback), but the fallback then throws.
+      if (body.model === PRIMARY)
+        return new Response(JSON.stringify(orResponse('{"artists":["One","Two"]}')));
+      return new Response(JSON.stringify(orResponse('garbage')));
+    };
+    const result = await extractArtists('x'.repeat(5000), { type: 'html', fetchFn });
+    expect(result.artists).toEqual(['One', 'Two']);
+  });
+
   it('falls back to the stronger model when the primary returns empty', async () => {
     const calls = [];
     const emptyResponse = orResponse('{"artists":[],"discoveredAliases":[]}');
