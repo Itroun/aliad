@@ -15,10 +15,10 @@ Rules:
 - Return valid JSON only, no markdown fencing`;
 
 // Force the reply into { artists: string[] }. Without this, larger/noisier pages
-// pushed mistral-nemo into a prose preamble + markdown fence and, worse, echoing
-// a {name,url} object per artist — bloating output past max_tokens so the JSON
-// truncated and parsing threw (silently dropping the page). A strict schema keeps
-// it to a flat string array, which both fixes the shape and stops the bloat.
+// pushed the extraction model into a prose preamble + markdown fence and, worse,
+// echoing a {name,url} object per artist — bloating output past max_tokens so the
+// JSON truncated and parsing threw (silently dropping the page). A strict schema
+// keeps it to a flat string array, which both fixes the shape and stops the bloat.
 export const ARTIST_SCHEMA = {
   type: 'json_schema',
   json_schema: {

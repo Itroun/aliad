@@ -17,22 +17,19 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { SYSTEM_PROMPT_TEXT, SYSTEM_PROMPT_HTML } from '../src/core/extract.js';
+import { SYSTEM_PROMPT_TEXT, SYSTEM_PROMPT_HTML, ARTIST_SCHEMA } from '../src/core/extract.js';
 import { normaliseName } from '../src/core/merge.js';
+import { PRIMARY, FALLBACK } from '../src/core/models.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
-// Candidates under test. Free variants included where they looked viable; the
-// script measures their real latency/failure rate so "good uptime?" is answered
-// empirically rather than trusted. Note gpt-oss-120b:free does NOT advertise
-// response_format — fine here since we parse JSON defensively, same as prod.
-const DEFAULT_MODELS = [
-  'mistralai/mistral-nemo',
-  'meta-llama/llama-3.1-8b-instruct',
-  'openai/gpt-oss-120b:free',
-  'openai/gpt-oss-20b:free',
-];
+// Candidates under test. The call mirrors prod by sending the strict json_schema
+// response_format (see callModel), so a candidate that can't honour structured
+// outputs surfaces as errors / invalid JSON here — which is the right signal,
+// since prod relies on that schema. Override per-run with --models. The two prod
+// tiers lead so a run always re-measures the current baseline.
+const DEFAULT_MODELS = [PRIMARY, FALLBACK];
 
 // Gold set: { label, type, input, expected[] }. `type` picks the same system
 // prompt prod would use ('html' → SYSTEM_PROMPT_HTML, else SYSTEM_PROMPT_TEXT).
@@ -131,6 +128,33 @@ back-to-back, before Growling Mad Scientists close things out.`,
   },
 ];
 
+// Large/noisy reader-page captures (real fetches via /api/fetch-page mode=reader,
+// the path prod falls through to when direct+cleanHTML is thin → type 'text' →
+// SYSTEM_PROMPT_TEXT). These are the inputs the tiny inline GOLD cases above never
+// exercised — exactly where mistral-nemo silently under-extracted in prod (a 101k
+// reader page yielded 26 of 65 acts). Ground truth is the page's own `### ` artist
+// headings; labels (set-type annotations stripped, _country codes stripped, collabs
+// + aka/by/presents forms kept whole) live in zna-labels.json next to the captures.
+function loadReaderFixtures() {
+  const dir = join(ROOT, 'tests/fixtures/extract');
+  try {
+    const labels = JSON.parse(readFileSync(join(dir, 'zna-labels.json'), 'utf8'));
+    // The per-slug capture read is inside the try too: a label entry whose
+    // .reader.txt is missing should degrade to the inline GOLD, not crash the
+    // whole bake-off at import time.
+    return Object.entries(labels).map(([slug, expected]) => ({
+      label: `zna-${slug}`,
+      type: 'text',
+      input: readFileSync(join(dir, `zna-${slug}.reader.txt`), 'utf8'),
+      expected,
+    }));
+  } catch {
+    return []; // fixtures absent/incomplete — fall back to the inline GOLD only
+  }
+}
+
+GOLD.push(...loadReaderFixtures());
+
 function parseArgs(argv) {
   const args = { models: DEFAULT_MODELS, runs: 1 };
   for (let i = 0; i < argv.length; i++) {
@@ -191,6 +215,10 @@ async function callModel(apiKey, model, system, userContent) {
     body: JSON.stringify({
       model,
       max_tokens: 4096,
+      // Mirror prod (extract.js callLLM): constrain the reply to { artists: [] }.
+      // Without it, larger pages drift into prose/fences and bloat past max_tokens
+      // — measuring the unconstrained shape would misrepresent prod behaviour.
+      response_format: ARTIST_SCHEMA,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: userContent },
