@@ -46,58 +46,34 @@ describe('detectInputType', () => {
 describe('callLLM', () => {
   it('parses a valid OpenRouter response', async () => {
     const fetchFn = async () => new Response(JSON.stringify(messy));
-    const result = await callLLM(
-      {
-        system: 'test',
-        messages: [{ role: 'user', content: 'test' }],
-        model: PRIMARY,
-      },
-      { fetchFn },
-    );
+    const result = await callLLM({ model: PRIMARY, kind: 'text', content: 'test' }, { fetchFn });
     expect(result.artists).toContain('Shpongle');
   });
 
-  it('sends the system prompt as a leading message', async () => {
+  it('sends only { model, kind, content } — no prompt or messages over the wire', async () => {
     let sent;
     const fetchFn = async (_url, opts) => {
       sent = JSON.parse(opts.body);
       return new Response(JSON.stringify(orResponse('{"artists":["X"]}')));
     };
-    await callLLM(
-      { system: 'SYS', messages: [{ role: 'user', content: 'U' }], model: PRIMARY },
-      { fetchFn },
-    );
-    expect(sent.messages).toEqual([
-      { role: 'system', content: 'SYS' },
-      { role: 'user', content: 'U' },
-    ]);
+    await callLLM({ model: PRIMARY, kind: 'html', content: 'page text' }, { fetchFn });
+    expect(sent).toEqual({ model: PRIMARY, kind: 'html', content: 'page text' });
+    // The server owns the prompt/schema; the client must not send them.
+    expect(sent.messages).toBeUndefined();
+    expect(sent.response_format).toBeUndefined();
   });
 
   it('handles markdown-fenced JSON in response', async () => {
     const fenced = orResponse('```json\n{"artists":["Test"],"discoveredAliases":[]}\n```');
     const fetchFn = async () => new Response(JSON.stringify(fenced));
-    const result = await callLLM(
-      {
-        system: 'test',
-        messages: [{ role: 'user', content: 'test' }],
-        model: PRIMARY,
-      },
-      { fetchFn },
-    );
+    const result = await callLLM({ model: PRIMARY, kind: 'text', content: 'test' }, { fetchFn });
     expect(result.artists).toEqual(['Test']);
   });
 
   it('throws on non-ok response', async () => {
     const fetchFn = async () => new Response('Server error', { status: 500 });
     await expect(
-      callLLM(
-        {
-          system: 'test',
-          messages: [{ role: 'user', content: 'test' }],
-          model: PRIMARY,
-        },
-        { fetchFn },
-      ),
+      callLLM({ model: PRIMARY, kind: 'text', content: 'test' }, { fetchFn }),
     ).rejects.toThrow(/500/);
   });
 });
