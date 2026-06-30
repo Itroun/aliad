@@ -7,6 +7,10 @@ compatibility_date = "2025-01-01"
 [assets]
 directory = "./dist"
 binding = "ASSETS"
+# Run the Worker before serving a static asset so server/index.js can attach
+# security headers (CSP etc.) to every document — otherwise existing assets are
+# served directly by the assets layer and bypass the Worker entirely.
+run_worker_first = true
 
 # Origin/Referer allowlist for the /api/* proxies (server/_lib/originCheck.js).
 # Comma-separated list of allowed origins, e.g. the prod domain plus the

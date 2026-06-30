@@ -27,6 +27,41 @@ const ROUTES = {
   '/api/fetch-page': fetchPage,
 };
 
+// Content-Security-Policy for the app shell. The strong line is `script-src
+// 'self'`: it's a second, independent layer under the manual escape()/textContent
+// discipline — even if an escaping bug slipped through, injected inline script
+// won't run. Tailored to what the app actually loads:
+//   - everything is same-origin EXCEPT Google Fonts: the stylesheet comes from
+//     fonts.googleapis.com (style-src) and the font files from fonts.gstatic.com
+//     (font-src) — see the @import in src/style.css.
+//   - style-src keeps 'unsafe-inline' because the policy can't distinguish a
+//     stray inline style attribute from a legit one; style injection is low-risk
+//     (no script), so this is the accepted trade. (JS-set element.style.* is NOT
+//     governed by style-src, so the graph's dynamic positioning needs nothing.)
+//   - connect-src 'self' means a hypothetical injected script can't exfiltrate to
+//     an external origin via fetch/XHR. frame-ancestors/base-uri/object-src lock
+//     down framing, <base> hijacking and plugins.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "form-action 'self'",
+].join('; ');
+
+const SECURITY_HEADERS = {
+  'Content-Security-Policy': CONTENT_SECURITY_POLICY,
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  // Superseded by frame-ancestors above, but a cheap belt for older browsers.
+  'X-Frame-Options': 'DENY',
+};
+
 export default {
   async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
@@ -40,7 +75,18 @@ export default {
       const context = { request, env, waitUntil: (p) => ctx.waitUntil(p) };
       return handler(context);
     }
-    // Static assets (and any SPA fallback) are served by the assets binding.
-    return env.ASSETS.fetch(request);
+    // Static assets (and any SPA fallback) are served by the assets binding. Wrap
+    // the response to attach the security headers to every document/asset (HSTS
+    // is left to the Cloudflare edge so it never forces https on localhost dev).
+    const asset = await env.ASSETS.fetch(request);
+    const headers = new Headers(asset.headers);
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      headers.set(name, value);
+    }
+    return new Response(asset.body, {
+      status: asset.status,
+      statusText: asset.statusText,
+      headers,
+    });
   },
 };
