@@ -9,6 +9,8 @@ const OVERALL_TIMEOUT_MS = 30_000;
 const READER_TIMEOUT_MS = 15_000;
 const RATE_LIMIT = 10;
 const RATE_WINDOW_SEC = 60;
+const MAX_REDIRECTS = 5;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 const CHROME_HEADERS = {
   'User-Agent':
@@ -55,6 +57,24 @@ export function isBlockedHost(hostname) {
   if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return true;
   if (host.includes(':')) return true;
   return false;
+}
+
+// Vet a redirect's Location against the SAME rules as the initial URL. The
+// initial isBlockedHost/https check only covers the URL the user submitted; a
+// permitted public host can answer with a 3xx pointing at an internal address
+// (cloud metadata, localhost), so every hop has to be re-checked. Returns the
+// resolved absolute URL string when allowed, or null when it must be blocked.
+export function safeRedirectTarget(location, baseUrl) {
+  if (!location) return null;
+  let next;
+  try {
+    next = new URL(location, baseUrl);
+  } catch {
+    return null;
+  }
+  if (next.protocol !== 'https:') return null;
+  if (isBlockedHost(next.hostname)) return null;
+  return next.toString();
 }
 
 export function looksLikeChallenge(text) {
@@ -119,13 +139,50 @@ async function handleDirect(parsed) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OVERALL_TIMEOUT_MS);
 
+  // Follow redirects by hand (`redirect: 'manual'`) so each hop's host is
+  // re-validated by safeRedirectTarget. `redirect: 'follow'` would let an
+  // allowed public host bounce us to an internal target unchecked. On Workers,
+  // 'manual' surfaces the 3xx with a readable Location (not a browser-style
+  // opaque redirect), so we can inspect and vet it.
+  let current = parsed.toString();
   let result;
+  let upstream;
   try {
-    result = await fetchWithRetry(
-      parsed.toString(),
-      { headers: CHROME_HEADERS, redirect: 'follow' },
-      { signal: controller.signal },
-    );
+    for (let hop = 0; ; hop++) {
+      result = await fetchWithRetry(
+        current,
+        { headers: CHROME_HEADERS, redirect: 'manual' },
+        { signal: controller.signal },
+      );
+      if (!result.ok) {
+        clearTimeout(timeout);
+        return new Response(result.reason, {
+          status: 502,
+          headers: { ...attemptsHeader(result.attempts), 'Content-Type': 'text/plain' },
+        });
+      }
+      upstream = result.response;
+      if (!REDIRECT_STATUSES.has(upstream.status)) break;
+
+      const location = upstream.headers.get('Location');
+      if (!location) break; // 3xx without a Location — treat as the final response.
+      if (hop >= MAX_REDIRECTS) {
+        clearTimeout(timeout);
+        return new Response('Too many redirects', {
+          status: 502,
+          headers: { ...attemptsHeader(result.attempts), 'Content-Type': 'text/plain' },
+        });
+      }
+      const next = safeRedirectTarget(location, current);
+      if (!next) {
+        clearTimeout(timeout);
+        return new Response('Redirect to a disallowed URL', {
+          status: 400,
+          headers: { ...attemptsHeader(result.attempts), 'Content-Type': 'text/plain' },
+        });
+      }
+      current = next;
+    }
   } catch (err) {
     clearTimeout(timeout);
     return new Response(`Fetch aborted: ${err.message}`, {
@@ -135,14 +192,6 @@ async function handleDirect(parsed) {
   }
   clearTimeout(timeout);
 
-  if (!result.ok) {
-    return new Response(result.reason, {
-      status: 502,
-      headers: { ...attemptsHeader(result.attempts), 'Content-Type': 'text/plain' },
-    });
-  }
-
-  const upstream = result.response;
   const buf = await upstream.arrayBuffer();
   if (buf.byteLength > MAX_RESPONSE_BYTES) {
     return new Response('Response too large', {

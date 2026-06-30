@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fetchWithRetry, isBlockedHost, looksLikeChallenge } from '../server/api/fetch-page.js';
+import {
+  fetchWithRetry,
+  isBlockedHost,
+  looksLikeChallenge,
+  safeRedirectTarget,
+} from '../server/api/fetch-page.js';
 
 function resp(status, { retryAfter } = {}) {
   return {
@@ -81,6 +86,41 @@ describe('isBlockedHost', () => {
     expect(isBlockedHost('')).toBe(true);
     expect(isBlockedHost(null)).toBe(true);
     expect(isBlockedHost(undefined)).toBe(true);
+  });
+});
+
+describe('safeRedirectTarget', () => {
+  const base = 'https://festival.example/lineup';
+
+  it('allows a redirect to another public https host', () => {
+    expect(safeRedirectTarget('https://cdn.example/page', base)).toBe('https://cdn.example/page');
+  });
+
+  it('resolves a relative Location against the current URL', () => {
+    expect(safeRedirectTarget('/2026', base)).toBe('https://festival.example/2026');
+  });
+
+  it('blocks a redirect to an internal IP (the SSRF bypass)', () => {
+    expect(safeRedirectTarget('http://169.254.169.254/latest/meta-data/', base)).toBe(null);
+    expect(safeRedirectTarget('https://169.254.169.254/', base)).toBe(null);
+  });
+
+  it('blocks a redirect to localhost or an internal name', () => {
+    expect(safeRedirectTarget('https://localhost/', base)).toBe(null);
+    expect(safeRedirectTarget('https://db.internal/', base)).toBe(null);
+  });
+
+  it('blocks a downgrade to http even on a public host', () => {
+    expect(safeRedirectTarget('http://example.com/', base)).toBe(null);
+  });
+
+  it('blocks a non-http(s) scheme like file:', () => {
+    expect(safeRedirectTarget('file:///etc/passwd', base)).toBe(null);
+  });
+
+  it('returns null for a missing or unparseable Location', () => {
+    expect(safeRedirectTarget(null, base)).toBe(null);
+    expect(safeRedirectTarget('', base)).toBe(null);
   });
 });
 
