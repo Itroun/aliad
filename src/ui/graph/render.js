@@ -13,6 +13,15 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const EASE = 0.08; // per-frame approach fraction — low = calm, gradual glides
 const DONE_EPS = 0.4; // px; stop animating once everything is this close
 
+// Honour prefers-reduced-motion: when set, nodes snap to their target positions
+// instead of easing toward them (the rAF glide loop never runs). Live so a
+// mid-session OS preference change takes effect on the next relayout.
+const reduceMotionMq =
+  typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(prefers-reduced-motion: reduce)')
+    : null;
+const prefersReducedMotion = () => !!reduceMotionMq && reduceMotionMq.matches;
+
 export function createGraphPane() {
   const root = document.createElement('div');
   root.className = 'graph-pane';
@@ -327,6 +336,16 @@ export function createGraphPane() {
   }
 
   function ensureAnimating() {
+    if (prefersReducedMotion()) {
+      // Reduced motion: snap straight onto targets, no easing loop.
+      if (rafId != null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      for (const [name, t] of targetPos) renderedPos.set(name, { x: t.x, y: t.y });
+      applyAll();
+      return;
+    }
     if (rafId == null) rafId = requestAnimationFrame(tick);
   }
 

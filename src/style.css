@@ -34,8 +34,8 @@
   --body: #ccd3de; /* body copy */
   --body-dim: #bcc1cb;
   --muted: #888fa0;
-  --faint: #6b7196;
-  --faint-2: #5a6086;
+  --faint: #787ea6; /* AA 5.01 on --bg (WCAG 1.4.3) */
+  --faint-2: #757ba3; /* AA 4.81 on --bg */
 
   --person: #acb4c4; /* person node (cool) */
 
@@ -52,7 +52,7 @@
   --btn-glow: 0 6px 22px rgba(201, 168, 94, 0.25);
 
   /* edges */
-  --edge: rgba(201, 168, 94, 0.5);
+  --edge: rgba(201, 168, 94, 0.58); /* non-text 3.52:1 on --bg (WCAG 1.4.11) */
   --edge-lit: var(--accent);
   --edge-dash: none;
 
@@ -75,8 +75,8 @@
   --body: #42566a;
   --body-dim: #42566a;
   --muted: #5d6b78;
-  --faint: #9aa6ad;
-  --faint-2: #9aa6ad;
+  --faint: #677078; /* AA 4.64 on cream --bg (was #9aa6ad → 2.29, sub-AA) */
+  --faint-2: #677078;
 
   --person: #1d3a5c;
 
@@ -1423,8 +1423,12 @@ body > #app {
   font-family: var(--ff-serif);
   font-weight: 300;
   font-size: 0.8125rem;
-  color: var(--faint);
-  opacity: 0.55;
+  /* Pending (still-resolving) state, kept visibly dimmer than resolved rows but
+     legible: --muted has the most contrast headroom, so at 0.85 it still clears
+     AA on dark (4.66) — light tops out ~3.7 (AA-large), the most a dimmed tier
+     can reach on a bright background. Was --faint @ 0.55 (sub-AA in both). */
+  color: var(--muted);
+  opacity: 0.85;
   transition:
     opacity 0.3s ease,
     color 0.3s ease;
@@ -1542,6 +1546,20 @@ body > #app {
   .theme-dark .node-kind-person .node-dot,
   .progress-bar.is-resolving::after {
     animation: none;
+  }
+
+  /* Streaming graph motion: node pop-in/fade-in and edge fade-in resolve
+     instantly so new acts appear in place rather than animating in. (The JS
+     node-position easing is gated separately in render.js; the auto-fit camera
+     glide is the .is-animating transition disabled below.) */
+  .node-enter,
+  .node-enter .node-dot,
+  .aliad-fadein {
+    animation: none;
+  }
+  .graph-vp.is-animating,
+  .graph-nodes-vp.is-animating {
+    transition: none;
   }
 }
 

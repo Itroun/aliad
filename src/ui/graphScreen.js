@@ -261,12 +261,20 @@ export function createGraphScreen({ lineup, onViewChange }) {
     // names the cluster + size for screen readers.
     const navOrder = [];
     const ariaLabels = new Map();
+    // Spoken kind word for the representative — the dot's shape/size is the only
+    // visual kind cue, so name it for screen readers (sighted users have the
+    // legend). 'collab' reads better spelled out.
+    const kindWord = { person: 'person', group: 'group', collab: 'collaboration' };
     for (const c of currentGraph.clusters) {
       const rep = c.nodes[0];
       if (!rep) continue;
       navOrder.push(rep);
       const count = c.nodes.length;
-      ariaLabels.set(rep, `${rep}, cluster of ${count} connected act${count === 1 ? '' : 's'}`);
+      const kind = kindWord[currentGraph.kinds?.get(rep)] || 'act';
+      ariaLabels.set(
+        rep,
+        `${rep}, ${kind}, cluster of ${count} connected act${count === 1 ? '' : 's'}`,
+      );
     }
 
     pane.update({
