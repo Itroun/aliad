@@ -73,9 +73,13 @@ export async function encodeLineup(names) {
 export async function decodeLineup(hash) {
   const raw = String(hash ?? '').replace(/^#/, '');
   const prefix = `${LINEUP_KEY}=`;
-  if (!raw.startsWith(prefix)) return null;
+  // The fragment may carry other `&`-joined params (e.g. the active-view marker
+  // `v=list`), so isolate the lineup param rather than assuming it's the whole
+  // fragment.
+  const param = raw.split('&').find((p) => p.startsWith(prefix));
+  if (!param) return null;
   try {
-    const bytes = fromBase64url(raw.slice(prefix.length));
+    const bytes = fromBase64url(param.slice(prefix.length));
     const text = new TextDecoder().decode(await gunzip(bytes));
     const names = dedupeNames(text.split('\n'));
     return names.length ? names : null;

@@ -48,6 +48,14 @@ describe('lineupUrl', () => {
     expect(await decodeLineup(undefined)).toBeNull();
   });
 
+  it('isolates the l= token when the fragment carries other params', async () => {
+    const frag = await encodeLineup(['Atmos']);
+    // The active-view marker is appended after the lineup token.
+    expect(await decodeLineup(`#${frag}&v=list`)).toEqual(['Atmos']);
+    // …and tolerates the lineup token not coming first.
+    expect(await decodeLineup(`#v=list&${frag}`)).toEqual(['Atmos']);
+  });
+
   it('never throws on a malformed token', async () => {
     expect(await decodeLineup('#l=not-valid-gzip')).toBeNull();
     expect(await decodeLineup('#l=!!!!')).toBeNull();

@@ -19,21 +19,43 @@ if (devProbe.el) document.body.append(devProbe.el);
 let activeController = null;
 let activeView = 'input';
 let graphScreen = null;
+// The `l=…` token for the active lineup (sans view marker), so a tab switch can
+// rewrite the URL without re-encoding. Null when no lineup is loaded.
+let currentFrag = null;
+
+// Compose the URL fragment from a lineup token + which view is showing. Map is
+// the default so only List needs a marker; Lineup (input) carries no fragment.
+function withView(frag, view) {
+  return view === 'list' ? `${frag}&v=list` : frag;
+}
+
+// Read the active view / lineup token back out of the current URL fragment.
+function viewFromHash() {
+  return window.location.hash.replace(/^#/, '').split('&').includes('v=list') ? 'list' : 'graph';
+}
+function lineupFragFromHash() {
+  return (
+    window.location.hash
+      .replace(/^#/, '')
+      .split('&')
+      .find((p) => p.startsWith('l=')) || null
+  );
+}
 
 const inputScreen = createInputScreen({
   onSubmit: handleSubmit,
   onCancel: cancelActive,
-  onViewChange: setView,
+  onViewChange: handleTabChange,
 });
-const emptyGraphScreen = createEmptyGraphScreen({ onViewChange: setView });
-const listScreen = createListScreen({ onViewChange: setView });
+const emptyGraphScreen = createEmptyGraphScreen({ onViewChange: handleTabChange });
+const listScreen = createListScreen({ onViewChange: handleTabChange });
 
 app.append(inputScreen.el);
 app.append(emptyGraphScreen.el);
 app.append(listScreen.el);
 applyViewVisibility();
 
-bootFromHash();
+restoreFromHash('replace');
 
 function cancelActive() {
   if (activeController) {
@@ -46,6 +68,23 @@ function setView(view) {
   if (view !== 'input' && view !== 'graph' && view !== 'list') return;
   activeView = view;
   applyViewVisibility();
+}
+
+// A user clicked a view tab. Switching tabs isn't a navigation between lineups,
+// so it never adds a history entry (replaceState) — but it keeps the URL honest
+// with what's on screen: Map/List carry the lineup fragment (+ a List marker, so
+// refresh/forward restores the right one); Lineup (the input form, which shows
+// the raw/empty input — not the resolved names in `l=`) drops the fragment. Back
+// and Forward stay reserved for moving between lineups.
+function handleTabChange(view) {
+  setView(view);
+  if (view === 'input' || !currentFrag) {
+    if (window.location.hash) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  } else {
+    history.replaceState(null, '', `#${withView(currentFrag, view)}`);
+  }
 }
 
 function applyViewVisibility() {
@@ -101,7 +140,8 @@ async function handleSubmit(input) {
     }
 
     inputScreen.clearBusy();
-    await runLineup(artists, signal);
+    // A submit is a new view: push a history entry so Back returns to input.
+    await runLineup(artists, signal, { urlUpdate: 'push' });
   } catch (err) {
     // An aborted run was superseded by a newer submit, which has set its own busy
     // state — leave it alone. Only a genuine failure unlocks the form here.
@@ -117,19 +157,31 @@ async function handleSubmit(input) {
 // identity-graph walk. Shared by the submit flow and the on-boot hash restore;
 // the caller owns the AbortController (submit reuses the one guarding the
 // fetch/extract step). Assumes `artists` is non-empty.
-async function runLineup(artists, signal) {
-  // Persisting to the URL is best-effort: a CompressionStream-less browser or a
-  // replaceState failure must never block the actual map from rendering.
-  try {
-    const frag = await encodeLineup(artists);
-    if (frag) history.replaceState(null, '', `#${frag}`);
-  } catch (err) {
-    console.warn('Could not persist lineup to URL', err);
+async function runLineup(artists, signal, { urlUpdate = 'replace', view = 'graph' } = {}) {
+  // Persist to the URL fragment so refresh / shared links / browser history all
+  // restore this exact map. `urlUpdate` picks the history behaviour:
+  //   'push'    — a fresh submit: add an entry so Back returns to the prior view
+  //   'replace' — on-boot restore: normalise the existing hash in place
+  //   'skip'    — popstate restore: the URL is already at this entry, leave it
+  // Persisting is best-effort: a CompressionStream-less browser or a history
+  // failure must never block the actual map from rendering.
+  if (urlUpdate !== 'skip') {
+    try {
+      const frag = await encodeLineup(artists);
+      if (frag) {
+        currentFrag = frag;
+        const url = `#${withView(frag, view)}`;
+        if (urlUpdate === 'push') history.pushState(null, '', url);
+        else history.replaceState(null, '', url);
+      }
+    } catch (err) {
+      console.warn('Could not persist lineup to URL', err);
+    }
   }
 
-  const graph = createGraphScreen({ lineup: artists, onViewChange: setView });
+  const graph = createGraphScreen({ lineup: artists, onViewChange: handleTabChange });
   replaceGraphScreen(graph);
-  setView('graph');
+  setView(view);
 
   await lookupAll(artists, {
     signal,
@@ -160,23 +212,53 @@ async function runLineup(artists, signal) {
   graph.finalize();
 }
 
-// On load, restore the map from the URL fragment if one is present. We replay
-// the lookup walk (Stage 3) rather than re-fetching/re-extracting — the names
-// are already resolved, and the D1 cache makes the rebuild cheap.
-async function bootFromHash() {
+// Reconcile the app to the URL fragment — the source of truth for which map is
+// shown. Runs on load and on every browser back/forward. A present `#l=`
+// restores that map by replaying the lookup walk (Stage 3) rather than
+// re-fetching/re-extracting — the names are already resolved and the D1 cache
+// makes the rebuild cheap; an absent fragment returns to the input screen.
+// `urlUpdate` is forwarded to runLineup: 'replace' on boot (normalise the hash),
+// 'skip' on popstate (the URL is already at the target entry — don't touch it).
+async function restoreFromHash(urlUpdate) {
   const names = await decodeLineup(window.location.hash);
-  if (!names) return;
 
+  // No lineup in the URL → show the input form, but KEEP the loaded map alive
+  // (hidden) so Forward / clicking Map returns to it instantly. This makes Back
+  // and the Lineup tab behave identically: both just switch view — neither tears
+  // the map down nor re-streams it.
+  if (!names) {
+    setView('input');
+    return;
+  }
+
+  const frag = lineupFragFromHash();
+  const view = viewFromHash();
+
+  // Same lineup already loaded — just switch view; don't re-run the walk. (Covers
+  // Forward back onto a map we still hold, and view markers like &v=list.)
+  if (frag === currentFrag && graphScreen) {
+    setView(view);
+    return;
+  }
+
+  // A different (or first) lineup → build it and stream, superseding any run
+  // still in flight for the previous one. `currentFrag` tracks what's loaded.
   cancelActive();
+  currentFrag = frag;
   activeController = new AbortController();
   const signal = activeController.signal;
   devProbe.reset();
-  runLineup(names, signal).catch((err) => {
+  runLineup(names, signal, { urlUpdate, view }).catch((err) => {
     if (err?.name === 'AbortError' || signal.aborted) return;
     console.error(err);
     setView('input');
   });
 }
+
+// Back/forward changes the fragment without a reload — replay it. Our own
+// pushState/replaceState don't fire popstate, so this only runs for genuine
+// history traversal, never for our own URL writes.
+window.addEventListener('popstate', () => restoreFromHash('skip'));
 
 function extract(content, type, signal) {
   // Extraction is the dominant cost; once it starts, every path is "Reading…"
