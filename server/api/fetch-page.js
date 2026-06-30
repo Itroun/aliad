@@ -213,10 +213,18 @@ async function handleDirect(parsed) {
     });
   }
 
+  // Never echo the upstream's Content-Type. This endpoint proxies arbitrary
+  // attacker-controlled pages, and the client only ever reads the body as a
+  // string (cleanHTML parses it inertly). Returning the upstream `text/html`
+  // would let `…/api/fetch-page?url=<evil-html>` render attacker script in OUR
+  // origin if a victim navigates straight to it. Force inert text + nosniff so
+  // the browser displays it, never executes it.
   return new Response(buf, {
     status: 200,
     headers: {
-      'Content-Type': upstream.headers.get('Content-Type') ?? 'text/html',
+      'Content-Type': 'text/plain; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': 'attachment',
       ...attemptsHeader(result.attempts),
     },
   });
