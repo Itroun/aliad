@@ -29,13 +29,15 @@ function withView(frag, view) {
   return view === 'list' ? `${frag}&v=list` : frag;
 }
 
-// Read the active view / lineup token back out of the current URL fragment.
-function viewFromHash() {
-  return window.location.hash.replace(/^#/, '').split('&').includes('v=list') ? 'list' : 'graph';
+// Read the active view / lineup token back out of a URL fragment. Take the hash
+// explicitly so a caller can snapshot it once (rather than re-reading
+// `location.hash`, which can shift under an interleaved navigation).
+function viewFromHash(hash) {
+  return hash.replace(/^#/, '').split('&').includes('v=list') ? 'list' : 'graph';
 }
-function lineupFragFromHash() {
+function lineupFragFromHash(hash) {
   return (
-    window.location.hash
+    hash
       .replace(/^#/, '')
       .split('&')
       .find((p) => p.startsWith('l=')) || null
@@ -100,20 +102,13 @@ function applyViewVisibility() {
   listScreen.setActiveView(activeView);
 }
 
-function replaceGraphScreen(next) {
-  if (graphScreen) {
-    graphScreen.el.remove();
-    graphScreen = null;
-  }
-  if (next) {
-    graphScreen = next;
-    app.append(graphScreen.el);
-    // The List view renders off the same graph; subscribing primes it with the
-    // current (initially empty) state and keeps it in step as results stream.
-    graphScreen.onGraphChange((graph, lineup) => listScreen.update(graph, lineup));
-  } else {
-    listScreen.update({ clusters: [], singletons: [] }, []);
-  }
+function replaceGraphScreen(graph) {
+  if (graphScreen) graphScreen.el.remove();
+  graphScreen = graph;
+  app.append(graphScreen.el);
+  // The List view renders off the same graph; subscribing primes it with the
+  // current (initially empty) state and keeps it in step as results stream.
+  graphScreen.onGraphChange((g, lineup) => listScreen.update(g, lineup));
   applyViewVisibility();
 }
 
@@ -220,7 +215,11 @@ async function runLineup(artists, signal, { urlUpdate = 'replace', view = 'graph
 // `urlUpdate` is forwarded to runLineup: 'replace' on boot (normalise the hash),
 // 'skip' on popstate (the URL is already at the target entry — don't touch it).
 async function restoreFromHash(urlUpdate) {
-  const names = await decodeLineup(window.location.hash);
+  // Snapshot the fragment once: decodeLineup awaits, and a second history
+  // traversal mid-decode could otherwise leave us reading `names` from one URL
+  // but the token/view from another. Everything below derives from this snapshot.
+  const hash = window.location.hash;
+  const names = await decodeLineup(hash);
 
   // No lineup in the URL → show the input form, but KEEP the loaded map alive
   // (hidden) so Forward / clicking Map returns to it instantly. This makes Back
@@ -231,8 +230,8 @@ async function restoreFromHash(urlUpdate) {
     return;
   }
 
-  const frag = lineupFragFromHash();
-  const view = viewFromHash();
+  const frag = lineupFragFromHash(hash);
+  const view = viewFromHash(hash);
 
   // Same lineup already loaded — just switch view; don't re-run the walk. (Covers
   // Forward back onto a map we still hold, and view markers like &v=list.)
