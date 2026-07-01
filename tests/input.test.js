@@ -66,7 +66,10 @@ describe('createInputScreen', () => {
   it('reads out a mix of links and acts', () => {
     mount();
     setText('Atmos\nhttps://example.com/lineup\nFilteria');
-    expect(root.querySelector('.readout-text').textContent).toBe('1 link + 2 acts');
+    const readout = root.querySelector('.readout-text').textContent;
+    expect(readout).toContain('1 link + 2 acts');
+    // The mixed case explains that the fetched lineup merges with the pasted acts.
+    expect(readout).toContain('merged with the pasted act');
   });
 
   it('"Try an example" fills the textarea and enables Map', () => {

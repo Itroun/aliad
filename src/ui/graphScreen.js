@@ -6,6 +6,7 @@ import { computeFitTransform, zoomAtPoint } from './graph/viewport.js';
 import { createFocusPanel } from './graph/focusPanel.js';
 import { createViewTabs } from './viewTabs.js';
 import { mountThemeToggle } from './themeToggle.js';
+import { noConnectionsHeading } from '../core/labels.js';
 
 export function createGraphScreen({ lineup, onViewChange }) {
   const root = document.createElement('div');
@@ -354,7 +355,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
     });
     // Hide the whole section when everything's connected; otherwise show the count.
     singletonSection.hidden = count === 0;
-    singletonLabel.textContent = `${count} act${count === 1 ? '' : 's'} with no connections`;
+    singletonLabel.textContent = noConnectionsHeading(count);
   }
 
   function updateProgress() {

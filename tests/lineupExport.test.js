@@ -69,20 +69,20 @@ describe('buildExportModel', () => {
 describe('toPlainText', () => {
   it('renders connections with a heading and via-chains', () => {
     const text = toPlainText(buildExportModel(graph(), { lineup: ['Cosmic Tide', 'Aurora Veil'] }));
-    expect(text).toContain('Same act, different names');
+    expect(text).toContain('Connected acts');
     expect(text).toContain('Cosmic Tide ↔ Aurora Veil');
     expect(text).toContain('via Some Person — aka Aurora Veil · member of The Glass Orchard');
   });
 
   it('renders a no-connections section listing leftover acts', () => {
     const text = toPlainText(buildExportModel(graph(), { lineup: ['Nova Drift'] }));
-    expect(text).toContain('No connections found');
+    expect(text).toMatch(/\d+ acts? with no connections/);
     expect(text).toContain('Nova Drift');
   });
 
   it('omits a section that has no content', () => {
     const text = toPlainText(buildExportModel(graph(), { lineup: ['Cosmic Tide', 'Aurora Veil'] }));
-    expect(text).not.toContain('No connections found');
+    expect(text).not.toContain('with no connections');
   });
 
   it('returns an empty string for an empty model', () => {

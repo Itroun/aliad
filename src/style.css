@@ -132,6 +132,21 @@ body > #app {
   position: relative;
 }
 
+/* Off-screen but available to screen readers — for labels that name a control
+   without a visible caption (e.g. the lineup textarea's <label>). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 /* ── Shared screen primitives ────────────────────────────────────── */
 
 .screen {
@@ -144,6 +159,12 @@ body > #app {
 
 .screen-graph {
   background: var(--sky-map);
+}
+
+/* The empty map has no graph/stars to make pop, so it uses the lighter --sky —
+   matching the empty list and input screen. Populated .screen-graph stays dark. */
+.screen-graph-empty {
+  background: var(--sky);
 }
 
 /* Background texture: a CSS star field in dark, an antique-chart grid in
@@ -334,7 +355,7 @@ body > #app {
 
 .empty-graph-card {
   position: relative;
-  max-width: 560px;
+  max-width: 680px;
   text-align: center;
   padding: 56px 64px;
 }
@@ -370,35 +391,15 @@ body > #app {
   border: 1px solid var(--hairline);
 }
 
-.empty-graph-eyebrow {
-  font-family: var(--ff-mono);
-  font-size: 0.625rem;
-  letter-spacing: 0.16em;
-  color: var(--accent);
-  margin-bottom: 16px;
-}
-
 .empty-graph-title {
   font-family: var(--ff-display);
   font-size: 3.5rem;
   line-height: 1;
-  white-space: nowrap;
+  /* Was nowrap for the old short title ("An empty map"); the longer titles now
+     need to wrap on narrow viewports rather than overflow the card frame. */
+  text-wrap: balance;
   color: var(--fg);
   margin: 0 0 18px;
-}
-
-/* The two-headline variants ship one per theme. */
-.empty-graph-title .title-dark {
-  display: inline;
-}
-.empty-graph-title .title-light {
-  display: none;
-}
-.theme-light .empty-graph-title .title-dark {
-  display: none;
-}
-.theme-light .empty-graph-title .title-light {
-  display: inline;
 }
 
 .empty-graph-msg {
@@ -521,8 +522,16 @@ body > #app {
 .field-labelrow {
   display: flex;
   align-items: baseline;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 10px;
+}
+
+.field-hint {
+  font-family: var(--ff-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
 }
 
 .link-btn {
@@ -614,6 +623,10 @@ body > #app {
 .decode-btn {
   position: relative;
   padding: 0 20px;
+  /* Pinned so the button holds its size through the busy state — sized to the
+     widest label ("Fetching…" + spinner) so the loading swap never reflows it. */
+  min-width: 138px;
+  justify-content: center;
   height: 46px;
   background: var(--btn-fill);
   border: none;
@@ -647,9 +660,13 @@ body > #app {
 }
 
 /* Busy: holds the fill, shows the rotating ◴ spinner, and the button itself
-   becomes the progress affordance while the form locks. */
+   becomes the progress affordance while the form locks. Widens to a fixed size
+   (sized to the longest progress string, "Reading page 10 of 10…") so the button
+   grows once on submit and then holds steady as the count ticks — no per-tick
+   reflow. Resting stays at the narrower base min-width. */
 .decode-btn.is-busy,
 .decode-btn.is-busy:disabled {
+  min-width: 228px;
   background: var(--btn-fill);
   border: none;
   color: var(--btn-fg);
@@ -1811,13 +1828,11 @@ body > #app {
   padding: 0;
 }
 
+/* No divider between evidence rows: they're all proofs of the one connection
+   named above, so a full-width rule wrongly read as separating distinct things.
+   Spacing alone groups them under the bold A ↔ B title. */
 .list-evidence {
   padding: 7px 0;
-  border-top: 1px solid var(--hairline);
-}
-
-.list-evidence:first-child {
-  border-top: none;
 }
 
 .list-person {
@@ -1859,24 +1874,16 @@ body > #app {
   padding: 3px 0;
 }
 
+/* Empty state reuses the graph card (.empty-graph-*) so both views match. The
+   scroll's asymmetric content padding is dropped here so the card centres over
+   the full region, matching the map's symmetric .empty-graph-body. */
+.list-scroll.is-empty {
+  padding: 0;
+}
+
 .list-empty {
-  text-align: center;
-  padding: 12vh 0;
-}
-
-.list-empty-title {
-  font-family: var(--ff-display);
-  font-weight: 400;
-  font-size: 2.125rem;
-  color: var(--fg);
-  margin: 0 0 12px;
-}
-
-.list-empty-msg {
-  font-family: var(--ff-serif);
-  font-size: 0.9375rem;
-  color: var(--muted);
-  max-width: 30em;
-  margin: 0 auto 24px;
-  line-height: 1.6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
 }

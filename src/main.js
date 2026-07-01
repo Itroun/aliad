@@ -121,12 +121,24 @@ async function handleSubmit(input) {
 
   // Lock the form and turn the button into a live progress indicator: this stretch
   // (URL fetch + the LLM extraction) is the several-second gap before the map
-  // appears, and otherwise looks like nothing is happening. URL submits start on
-  // "Fetching…"; extract() below flips every path to "Reading…" once it runs.
-  inputScreen.setBusy(input.urls.length ? 'Fetching the lineup…' : 'Reading the lineup…');
+  // appears, and otherwise looks like nothing is happening. With ≥2 link pages we
+  // show a running "Reading page x of y…" (each page's extraction completing bumps
+  // the count via onPageRead); a single page or a plain paste has no meaningful
+  // count, so it stays on a phase label.
+  const pageCount = input.urls?.length ?? 0;
+  let pagesRead = 0;
+  if (pageCount >= 2) inputScreen.setBusy(`Fetching ${pageCount} pages…`);
+  else if (pageCount === 1) inputScreen.setBusy('Fetching…');
+  else inputScreen.setBusy('Reading…');
 
   try {
-    const { artists } = await resolveInput(input, signal);
+    const { artists } = await resolveInput(input, signal, {
+      onPageRead: () => {
+        pagesRead += 1;
+        if (pageCount >= 2) inputScreen.setBusy(`Reading page ${pagesRead} of ${pageCount}…`);
+        else inputScreen.setBusy('Reading…');
+      },
+    });
     if (!artists.length) {
       inputScreen.clearBusy();
       setView('input');
@@ -260,9 +272,8 @@ async function restoreFromHash(urlUpdate) {
 window.addEventListener('popstate', () => restoreFromHash('skip'));
 
 function extract(content, type, signal) {
-  // Extraction is the dominant cost; once it starts, every path is "Reading…"
-  // (for URL submits this is the fetch→read handoff).
-  inputScreen.setBusy('Reading the lineup…');
+  // The busy text (incl. the "Reading page x of y…" count) is driven by
+  // handleSubmit via onPageRead; this stays a pure extract.
   return extractArtists(content, {
     type,
     signal,
@@ -278,9 +289,9 @@ function extract(content, type, signal) {
 // part in parallel — fetch+extract the URLs, parse the loose text — then merge
 // into one flat lineup (combineExtractions dedupes across the two). A "paste
 // anything" field that mixes a stage link with a few typed acts just works.
-async function resolveInput(input, signal) {
+async function resolveInput(input, signal, { onPageRead } = {}) {
   const parts = [];
-  if (input.urls?.length) parts.push(resolveUrls(input.urls, signal));
+  if (input.urls?.length) parts.push(resolveUrls(input.urls, signal, onPageRead));
   if (input.text) parts.push(resolveTextPart(input, signal));
 
   if (!parts.length) return { artists: [] };
@@ -306,14 +317,17 @@ function resolveTextPart(input, signal) {
 // and extract each URL in parallel, then merge into one flat lineup so the graph
 // clusters across the whole festival. A page that fails to fetch/parse is skipped
 // with a warning rather than failing the whole submission.
-async function resolveUrls(urls, signal) {
+async function resolveUrls(urls, signal, onPageRead) {
   const results = await Promise.allSettled(
     urls.map(async (url) => {
       const { kind, body } = await fetchWithFallbacks(url, {
         signal,
         onAttempt: (attempt) => devProbe.onAttempt({ ...attempt, url }),
       });
-      return extract(body, kind === 'html' ? 'html' : 'messy-text', signal);
+      const extracted = await extract(body, kind === 'html' ? 'html' : 'messy-text', signal);
+      // A page is "read" once its extraction resolves; drives the "x of y" count.
+      onPageRead?.();
+      return extracted;
     }),
   );
 

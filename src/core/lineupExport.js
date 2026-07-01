@@ -8,6 +8,7 @@
 // List UI and its Copy button share one source of truth and it's unit-testable.
 
 import { normaliseName } from './merge.js';
+import { noConnectionsHeading } from './labels.js';
 
 // Build the structured model the List view renders. `lineup` is the original
 // act-name order; singletons are derived from it (acts not in any cluster) so
@@ -55,7 +56,8 @@ export function toPlainText(model) {
   const blocks = [];
 
   if (clusters.length) {
-    const lines = ['Same act, different names', '========================='];
+    const heading = 'Connected acts';
+    const lines = [heading, '='.repeat(heading.length)];
     for (const cluster of clusters) {
       for (const edge of cluster.edges) {
         lines.push(`${edge.a} ↔ ${edge.b}`);
@@ -66,7 +68,8 @@ export function toPlainText(model) {
   }
 
   if (singletons.length) {
-    const lines = ['No connections found', '--------------------', ...singletons];
+    const heading = noConnectionsHeading(singletons.length);
+    const lines = [heading, '-'.repeat(heading.length), ...singletons];
     blocks.push(lines.join('\n'));
   }
 

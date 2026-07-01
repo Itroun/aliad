@@ -31,8 +31,9 @@ const PLACEHOLDER = [
   'Cosmic Tide vs Aurora Veil',
   'The Glass Orchard',
   '',
-  'https://stellarfest.example/lineup',
-  'https://stellarfest.example/forest-stage',
+  'https://festival.example/lineup',
+  'https://festival.example/main-stage',
+  'https://festival.example/lineup/forest-stage',
 ].join('\n');
 
 // Whole-line URLs past this point are dropped on submit (abuse / runaway-paste
@@ -63,15 +64,19 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
         </div>
         <h1 class="input-title">Who&rsquo;s performing?</h1>
         <p class="input-lede">
-          Paste a festival lineup or drop in a link &mdash; or both.
+          Paste a festival lineup, a link to a lineup or both.
           <span class="lede-accent"> aliad </span>
           finds the other names each act performs under, so you can see who&rsquo;s playing more than once.
         </p>
       </div>
 
-      <label class="field field-paste">
-        ${showExample ? '<div class="field-labelrow"><button type="button" class="link-btn example-btn">Try an example &darr;</button></div>' : ''}
-        <textarea class="lineup-input"
+      <div class="field field-paste">
+        <div class="field-labelrow">
+          <span class="field-hint">One act or link per line</span>
+          ${showExample ? '<button type="button" class="link-btn example-btn">Try an example</button>' : ''}
+        </div>
+        <label class="visually-hidden" for="lineup-input">Festival lineup &mdash; paste artist names, a link, or both</label>
+        <textarea id="lineup-input" class="lineup-input"
           rows="11"
           placeholder="${PLACEHOLDER}"
         ></textarea>
@@ -79,7 +84,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
           <span class="readout-icon" aria-hidden="true">&#x2726;</span>
           <span class="readout-text"></span>
         </div>
-      </label>
+      </div>
 
       <div class="decode-row">
         <button type="button" class="decode-btn" disabled>
@@ -164,8 +169,20 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   function describe(linkCount, actCount) {
     const links = linkCount ? `${linkCount} link${linkCount === 1 ? '' : 's'}` : '';
     const acts = actCount ? `${actCount} act${actCount === 1 ? '' : 's'}` : '';
-    if (links && acts) return `${links} + ${acts}`;
-    if (links) return `${links} — we’ll read the lineup off each page`;
+    const pageRead =
+      linkCount === 1
+        ? 'The page will be read for its lineup'
+        : 'Each page will be read for its lineup';
+
+    if (links && acts) {
+      const pastedActs = actCount === 1 ? 'the pasted act' : 'the pasted acts';
+      return `${links} + ${acts} found. ${pageRead}, then merged with ${pastedActs}.`;
+    }
+    if (links) {
+      return linkCount === 1
+        ? `${links} found. ${pageRead}.`
+        : `${links} found. ${pageRead} and the lineups will be merged.`;
+    }
     return acts;
   }
 

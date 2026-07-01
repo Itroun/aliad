@@ -14,8 +14,8 @@ export function createEmptyGraphScreen({ onViewChange } = {}) {
     </header>
     <section class="empty-graph-body">
       <div class="empty-graph-card">
-        <h2 class="empty-graph-title">An empty map</h2>
-        <p class="empty-graph-msg">Add a lineup to see it mapped out.</p>
+        <h2 class="empty-graph-title">Nothing mapped yet</h2>
+        <p class="empty-graph-msg">Add a lineup and its connections will appear here as a map you can explore.</p>
         <button type="button" class="decode-btn empty-graph-go">
           <span>Go to lineup</span>
         </button>

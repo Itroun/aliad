@@ -5,6 +5,7 @@
 // results arrive. Plain DOM, mirrors emptyGraphScreen.js.
 
 import { buildExportModel, toPlainText } from '../core/lineupExport.js';
+import { noConnectionsHeading } from '../core/labels.js';
 import { createViewTabs } from './viewTabs.js';
 import { mountThemeToggle } from './themeToggle.js';
 
@@ -72,11 +73,16 @@ export function createListScreen({ onViewChange } = {}) {
 
   function renderEmpty() {
     copyBtn.hidden = true;
+    // Drop the scroll padding so the card centres over the full region, matching
+    // the map empty state (whose .empty-graph-body pads symmetrically).
+    scroll.classList.add('is-empty');
     scroll.innerHTML = `
       <div class="list-empty">
-        <h2 class="list-empty-title">Nothing to list yet</h2>
-        <p class="list-empty-msg">Map a lineup and its connections will appear here as plain text you can copy out.</p>
-        <button type="button" class="decode-btn list-empty-go"><span>Go to lineup</span></button>
+        <div class="empty-graph-card">
+          <h2 class="empty-graph-title">Nothing listed yet</h2>
+          <p class="empty-graph-msg">Add a lineup and its connections will appear here as plain text you can copy out.</p>
+          <button type="button" class="decode-btn list-empty-go"><span>Go to lineup</span></button>
+        </div>
       </div>
     `;
     scroll
@@ -90,6 +96,7 @@ export function createListScreen({ onViewChange } = {}) {
       renderEmpty();
       return;
     }
+    scroll.classList.remove('is-empty');
     copyBtn.hidden = false;
 
     const sections = [];
@@ -127,16 +134,17 @@ export function createListScreen({ onViewChange } = {}) {
         .join('');
       sections.push(`
         <section class="list-section">
-          <h2 class="list-heading">Same act, different names</h2>
+          <h2 class="list-heading">Connected acts</h2>
           <div class="list-edges">${blocks}</div>
         </section>`);
     }
 
     if (model.singletons.length) {
       const items = model.singletons.map((n) => `<li>${escape(n)}</li>`).join('');
+      // Shared heading so the list and map views always read the same.
       sections.push(`
         <section class="list-section">
-          <h2 class="list-heading">No connections found</h2>
+          <h2 class="list-heading">${escape(noConnectionsHeading(model.singletons.length))}</h2>
           <ul class="list-singletons">${items}</ul>
         </section>`);
     }
