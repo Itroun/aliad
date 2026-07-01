@@ -222,7 +222,16 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
         { rel: groupBucketRel(entry), with: otherName },
       ]);
     } else {
-      pushEvidence(otherKey, entry.displayName || otherName, ownerHops(entry, root));
+      const hops = ownerHops(entry, root);
+      // Self-evident "X ↔ X vs Y": the row reaches the other node through a combo
+      // part that IS that node (its owner name normalises to the node's own key —
+      // e.g. solo "Ree.K" reached via the "Ree-K" part of "DOMINO vs Ree-K", a
+      // punctuation variant of the same act). The combo label already shows the
+      // part, so this restates nothing. The bridge loop's isPartKey/sharesVisibleOwner
+      // guards can't catch it — the shared key equals the node's own key, so it's
+      // skipped there and falls through to this direct path. Drop it here instead.
+      if (hops.every((h) => normaliseName(h.with) === otherKey)) return;
+      pushEvidence(otherKey, entry.displayName || otherName, hops);
     }
   };
   // A direct, non-via aka straight between the two cluster nodes (one lists the

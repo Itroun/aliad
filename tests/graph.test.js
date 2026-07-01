@@ -610,7 +610,11 @@ describe('buildGraph', () => {
       const solo = entry('Ree.K', { aliases: ['Rie Kurihara'] });
       const vs = combo('DOMINO vs Ree-K', {
         DOMINO: {},
-        'Ree-K': { aliases: ['Rie Kurihara'] },
+        // The part carries a punctuation-variant alias of its OWN name ("Ree.K"),
+        // which normalises to the solo node's own key ("ree k"). That collision is
+        // what routed the row through the direct-aka path and past the bridge-loop
+        // guards — the actual bug the earlier fixture (person-only alias) missed.
+        'Ree-K': { aliases: ['Rie Kurihara', 'Ree.K'] },
       });
       const { clusters, singletons } = buildGraph([solo, vs]);
       expect(clusters).toHaveLength(0);
