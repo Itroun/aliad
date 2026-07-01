@@ -64,9 +64,8 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
         </div>
         <h1 class="input-title">Who&rsquo;s performing?</h1>
         <p class="input-lede">
-          Paste a festival lineup, a link to a lineup or both.
-          <span class="lede-accent"> aliad </span>
-          finds the other names each act performs under, so you can see who&rsquo;s playing more than once.
+          Find all acts playing more than once. Enter a festival lineup below
+          (link to it or paste the artists) to map every alias.
         </p>
       </div>
 

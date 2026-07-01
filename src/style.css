@@ -19,7 +19,7 @@
   /* ── Shape ────────────────────────────────────────────── */
   --radius: 3px;
   --topbar-h: 62px;
-  --inspector-w: 448px;
+  --inspector-w: 410px;
 
   /* ── Dark "Constellation" (default) ───────────────────── */
   --bg: #070a17;
@@ -92,7 +92,7 @@
   --btn-keyline: inset 0 0 0 1px rgba(241, 231, 205, 0.18);
   --btn-glow: 0 8px 24px rgba(29, 58, 92, 0.18);
 
-  --edge: rgba(29, 58, 92, 0.65);
+  --edge: rgba(29, 58, 92, 0.74);
   --edge-lit: #b23a2e;
   --edge-dash: 5 4;
 
@@ -496,11 +496,6 @@ body > #app {
   color: var(--body);
   margin: 0 auto;
   max-width: 620px;
-}
-
-.lede-accent {
-  font-style: italic;
-  color: var(--accent);
 }
 
 .field {
@@ -1240,6 +1235,17 @@ body > #app {
   opacity: 0.28;
 }
 
+/* Light theme reads fainter than the dark theme's glow, so the un-selected
+   clusters over-dim there. Lift the dimmed floor in light mode only, keeping
+   the selected cluster clearly the brighter of the two. */
+.theme-light .graph-node.is-dimmed {
+  opacity: 0.5;
+}
+.theme-light .graph-edge.is-dimmed .edge-line,
+.theme-light .graph-edge.is-dimmed .edge-tick {
+  opacity: 0.42;
+}
+
 /* ── Detail panel (inspector) ────────────────────────────────────── */
 
 .panel-section {
@@ -1314,7 +1320,7 @@ body > #app {
 .connection-title {
   font-family: var(--ff-serif);
   font-weight: 700;
-  font-size: 1.25rem;
+  font-size: 1.1rem;
   line-height: 1.2;
   color: var(--fg);
   margin-bottom: 16px;
@@ -1322,7 +1328,7 @@ body > #app {
 
 .connection-sep {
   color: var(--muted);
-  margin: 0 8px;
+  margin: 0 5px;
 }
 
 .connection-toggle {
