@@ -62,6 +62,22 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
 };
 
+// Re-emit a response with the security headers merged in. Preserves the original
+// body stream untouched, so SSE (the closure endpoint) keeps streaming; `set`
+// (not append) means a handler that already sent one — e.g. fetch-page's own
+// nosniff — ends up with a single, canonical value rather than a duplicate.
+function withSecurityHeaders(response) {
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+    headers.set(name, value);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
@@ -70,23 +86,16 @@ export default {
       // Origin/Referer allowlist guards every /api/* route from one chokepoint —
       // these are our paid proxies and all serve our own same-origin frontend.
       if (!checkOrigin(request, env).allowed) {
-        return new Response('Forbidden origin', { status: 403 });
+        return withSecurityHeaders(new Response('Forbidden origin', { status: 403 }));
       }
       const context = { request, env, waitUntil: (p) => ctx.waitUntil(p) };
-      return handler(context);
+      // Same headers as the app shell go on API responses too (nosniff matters
+      // most for JSON/text; the rest are harmless and keep the surface uniform).
+      return withSecurityHeaders(await handler(context));
     }
-    // Static assets (and any SPA fallback) are served by the assets binding. Wrap
-    // the response to attach the security headers to every document/asset (HSTS
+    // Static assets (and any SPA fallback) are served by the assets binding (HSTS
     // is left to the Cloudflare edge so it never forces https on localhost dev).
     const asset = await env.ASSETS.fetch(request);
-    const headers = new Headers(asset.headers);
-    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
-      headers.set(name, value);
-    }
-    return new Response(asset.body, {
-      status: asset.status,
-      statusText: asset.statusText,
-      headers,
-    });
+    return withSecurityHeaders(asset);
   },
 };
