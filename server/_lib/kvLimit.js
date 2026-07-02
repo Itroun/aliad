@@ -27,11 +27,14 @@ export async function checkDailyCeiling(env, { key, limit, now = Date.now }) {
   }
 }
 
-export async function incrementDailyCeiling(env, storageKey) {
-  if (!env?.KV || !storageKey) return;
+// Bump the daily counter by `count` (default 1). The openrouter endpoint passes
+// the number of upstream model calls a request actually made, so an escalated
+// extraction (cheap + fallback) draws down two units rather than one.
+export async function incrementDailyCeiling(env, storageKey, count = 1) {
+  if (!env?.KV || !storageKey || count <= 0) return;
   try {
     const raw = await env.KV.get(storageKey);
-    const next = (raw ? Number(raw) : 0) + 1;
+    const next = (raw ? Number(raw) : 0) + count;
     await env.KV.put(storageKey, String(next), { expirationTtl: 172_800 });
   } catch {
     // swallow — budget tracking is best-effort

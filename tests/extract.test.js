@@ -1,17 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   detectInputType,
   extractArtists,
-  callLLM,
-  looksUnderExtracted,
+  callExtract,
   combineExtractions,
 } from '../src/core/extract.js';
-import messy from './fixtures/openrouter-extract-messy-text.json';
-import html from './fixtures/openrouter-extract-html.json';
-import { PRIMARY, FALLBACK } from '../src/core/models.js';
 
-// Build an OpenRouter chat-completions response wrapping a model's raw text.
-const orResponse = (text) => ({ choices: [{ message: { role: 'assistant', content: text } }] });
+// The proxy now returns the finished { artists, meta } — model-tier selection and
+// LLM-reply parsing happen server-side (covered in tests/extractCore.test.js and
+// tests/openrouter-endpoint.test.js). So the client just posts { kind, content }
+// and reads the artist list back.
+const proxyResponse = (artists, meta) =>
+  new Response(JSON.stringify(meta ? { artists, meta } : { artists }));
 
 describe('detectInputType', () => {
   it('returns clean for one-per-line input', () => {
@@ -43,59 +43,40 @@ describe('detectInputType', () => {
   });
 });
 
-describe('callLLM', () => {
-  it('parses a valid OpenRouter response', async () => {
-    const fetchFn = async () => new Response(JSON.stringify(messy));
-    const result = await callLLM({ model: PRIMARY, kind: 'text', content: 'test' }, { fetchFn });
-    expect(result.artists).toContain('Shpongle');
-  });
-
-  it('sends only { model, kind, content } — no prompt or messages over the wire', async () => {
+describe('callExtract', () => {
+  it('posts only { kind, content } to the proxy', async () => {
     let sent;
-    const fetchFn = async (_url, opts) => {
+    let url;
+    const fetchFn = async (u, opts) => {
+      url = u;
       sent = JSON.parse(opts.body);
-      return new Response(JSON.stringify(orResponse('{"artists":["X"]}')));
+      return proxyResponse(['X']);
     };
-    await callLLM({ model: PRIMARY, kind: 'html', content: 'page text' }, { fetchFn });
-    expect(sent).toEqual({ model: PRIMARY, kind: 'html', content: 'page text' });
-    // The server owns the prompt/schema; the client must not send them.
+    const { artists } = await callExtract({ kind: 'html', content: 'page text' }, { fetchFn });
+    expect(url).toBe('/api/openrouter');
+    expect(sent).toEqual({ kind: 'html', content: 'page text' });
+    // The server owns the prompt/schema/model — the client must not send them.
     expect(sent.messages).toBeUndefined();
-    expect(sent.response_format).toBeUndefined();
+    expect(sent.model).toBeUndefined();
+    expect(artists).toEqual(['X']);
   });
 
-  it('handles markdown-fenced JSON in response', async () => {
-    const fenced = orResponse('```json\n{"artists":["Test"],"discoveredAliases":[]}\n```');
-    const fetchFn = async () => new Response(JSON.stringify(fenced));
-    const result = await callLLM({ model: PRIMARY, kind: 'text', content: 'test' }, { fetchFn });
-    expect(result.artists).toEqual(['Test']);
+  it('returns the meta block when present', async () => {
+    const meta = { calls: [{ model: 'm', outputArtists: 1, durationMs: 5 }] };
+    const fetchFn = async () => proxyResponse(['X'], meta);
+    const result = await callExtract({ kind: 'text', content: 't' }, { fetchFn });
+    expect(result.meta).toEqual(meta);
   });
 
-  it('throws on non-ok response', async () => {
-    const fetchFn = async () => new Response('Server error', { status: 500 });
-    await expect(
-      callLLM({ model: PRIMARY, kind: 'text', content: 'test' }, { fetchFn }),
-    ).rejects.toThrow(/500/);
-  });
-});
-
-describe('looksUnderExtracted', () => {
-  it('flags empty output on non-trivial input', () => {
-    expect(looksUnderExtracted([], 500)).toBe(true);
-    expect(looksUnderExtracted([], 10)).toBe(false);
+  it('throws on a non-ok response', async () => {
+    const fetchFn = async () => new Response('nope', { status: 502 });
+    await expect(callExtract({ kind: 'text', content: 't' }, { fetchFn })).rejects.toThrow(/502/);
   });
 
-  it('does not flag small inputs with a few artists', () => {
-    expect(looksUnderExtracted(['A', 'B'], 400)).toBe(false);
-    expect(looksUnderExtracted(['A'], 1500)).toBe(false);
-  });
-
-  it('flags large inputs with far fewer artists than expected', () => {
-    expect(looksUnderExtracted(['A', 'B'], 5000)).toBe(true);
-    expect(looksUnderExtracted(['A', 'B', 'C'], 10000)).toBe(true);
-  });
-
-  it('does not flag large inputs with plenty of artists', () => {
-    expect(looksUnderExtracted(Array(30).fill('x'), 10000)).toBe(false);
+  it('defaults artists to [] when the proxy omits them', async () => {
+    const fetchFn = async () => new Response(JSON.stringify({}));
+    const result = await callExtract({ kind: 'text', content: 't' }, { fetchFn });
+    expect(result.artists).toEqual([]);
   });
 });
 
@@ -125,119 +106,61 @@ describe('combineExtractions', () => {
 });
 
 describe('extractArtists', () => {
-  it('uses parseLineup for clean text', async () => {
+  it('uses parseLineup for clean text (no network)', async () => {
     const result = await extractArtists('Infected Mushroom\nShpongle', { type: 'clean-text' });
     expect(result.artists).toEqual(['Infected Mushroom', 'Shpongle']);
   });
 
-  it('calls LLM for messy text', async () => {
-    const fetchFn = async () => new Response(JSON.stringify(messy));
-    const result = await extractArtists('Infected Mushroom, Shpongle, Aphex Twin, and more...', {
+  it('returns an empty lineup for blank content without calling the proxy', async () => {
+    const fetchFn = vi.fn();
+    const result = await extractArtists('   ', { type: 'messy-text', fetchFn });
+    expect(result.artists).toEqual([]);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('extracts messy text via the proxy', async () => {
+    const fetchFn = async () => proxyResponse(['Infected Mushroom', 'Shpongle']);
+    const result = await extractArtists('Infected Mushroom, Shpongle, and more...', {
       type: 'messy-text',
       fetchFn,
     });
-    expect(result.artists).toContain('Infected Mushroom');
-    expect(result.artists).toContain('Shpongle');
+    expect(result.artists).toEqual(['Infected Mushroom', 'Shpongle']);
   });
 
-  it('calls LLM for html type', async () => {
-    const fetchFn = async () => new Response(JSON.stringify(html));
-    const result = await extractArtists('Some festival page content about Dado vs Dino Psaras...', {
+  it('sends kind "html" for html input', async () => {
+    let sent;
+    const fetchFn = async (_u, opts) => {
+      sent = JSON.parse(opts.body);
+      return proxyResponse(['Dado vs Dino Psaras']);
+    };
+    const result = await extractArtists('Some festival page about Dado vs Dino Psaras...', {
       type: 'html',
       fetchFn,
     });
+    expect(sent.kind).toBe('html');
     expect(result.artists).toContain('Dado vs Dino Psaras');
   });
 
-  it('falls back to the stronger model when the primary returns suspiciously few artists for a large input', async () => {
-    const calls = [];
-    const primaryResponse = orResponse('{"artists":["One","Two"],"discoveredAliases":[]}');
-    const fallbackResponse = orResponse(
-      '{"artists":["A","B","C","D","E","F","G","H"],"discoveredAliases":[]}',
-    );
-    const fetchFn = async (_url, opts) => {
-      const body = JSON.parse(opts.body);
-      calls.push(body.model);
-      if (body.model === PRIMARY) return new Response(JSON.stringify(primaryResponse));
-      return new Response(JSON.stringify(fallbackResponse));
+  it('fires onCall for each server-side model call reported in meta', async () => {
+    const meta = {
+      calls: [
+        { model: 'cheap', outputArtists: 2, durationMs: 100 },
+        { model: 'strong', outputArtists: 6, durationMs: 400 },
+      ],
     };
-    const bigInput = 'x'.repeat(5000);
-    const result = await extractArtists(bigInput, { type: 'html', fetchFn });
-    expect(calls).toEqual([PRIMARY, FALLBACK]);
-    expect(result.artists).toHaveLength(8);
+    const fetchFn = async () => proxyResponse(['A', 'B', 'C', 'D', 'E', 'F'], meta);
+    const seen = [];
+    await extractArtists('x'.repeat(50), { type: 'html', fetchFn, onCall: (c) => seen.push(c) });
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toMatchObject({ model: 'cheap', outputArtists: 2, durationMs: 100 });
+    expect(seen[0].inputChars).toBe(50);
+    expect(seen[1]).toMatchObject({ model: 'strong', outputArtists: 6 });
   });
 
-  it('keeps the primary result when the fallback returns fewer artists', async () => {
-    const primaryResponse = orResponse('{"artists":["One","Two"],"discoveredAliases":[]}');
-    const fallbackResponse = orResponse('{"artists":["Only"],"discoveredAliases":[]}');
-    const fetchFn = async (_url, opts) => {
-      const body = JSON.parse(opts.body);
-      if (body.model === PRIMARY) return new Response(JSON.stringify(primaryResponse));
-      return new Response(JSON.stringify(fallbackResponse));
-    };
-    const bigInput = 'x'.repeat(5000);
-    const result = await extractArtists(bigInput, { type: 'html', fetchFn });
-    expect(result.artists).toEqual(['One', 'Two']);
-  });
-
-  it('does not fall back for small inputs even with few artists', async () => {
-    const calls = [];
-    const primaryResponse = orResponse('{"artists":["One","Two"],"discoveredAliases":[]}');
-    const fetchFn = async (_url, opts) => {
-      calls.push(JSON.parse(opts.body).model);
-      return new Response(JSON.stringify(primaryResponse));
-    };
-    await extractArtists('short lineup text', { type: 'messy-text', fetchFn });
-    expect(calls).toEqual([PRIMARY]);
-  });
-
-  it('falls back to the stronger model when the primary throws (truncated/unparseable)', async () => {
-    const calls = [];
-    const fallbackResponse = orResponse('{"artists":["Recovered"]}');
-    const fetchFn = async (_url, opts) => {
-      const body = JSON.parse(opts.body);
-      calls.push(body.model);
-      // Primary returns truncated JSON (as a real max_tokens cutoff would) → parse throws.
-      if (body.model === PRIMARY)
-        return new Response(JSON.stringify(orResponse('{"artists":["A","B"')));
-      return new Response(JSON.stringify(fallbackResponse));
-    };
-    const result = await extractArtists('x'.repeat(5000), { type: 'html', fetchFn });
-    expect(calls).toEqual([PRIMARY, FALLBACK]);
-    expect(result.artists).toEqual(['Recovered']);
-  });
-
-  it('propagates when both models fail', async () => {
-    const fetchFn = async () => new Response(JSON.stringify(orResponse('not json at all')));
-    await expect(extractArtists('x'.repeat(5000), { type: 'html', fetchFn })).rejects.toThrow(
-      /parse/i,
-    );
-  });
-
-  it('keeps the primary result when the fallback throws', async () => {
-    const fetchFn = async (_url, opts) => {
-      const body = JSON.parse(opts.body);
-      // Primary under-extracts (triggers fallback), but the fallback then throws.
-      if (body.model === PRIMARY)
-        return new Response(JSON.stringify(orResponse('{"artists":["One","Two"]}')));
-      return new Response(JSON.stringify(orResponse('garbage')));
-    };
-    const result = await extractArtists('x'.repeat(5000), { type: 'html', fetchFn });
-    expect(result.artists).toEqual(['One', 'Two']);
-  });
-
-  it('falls back to the stronger model when the primary returns empty', async () => {
-    const calls = [];
-    const emptyResponse = orResponse('{"artists":[],"discoveredAliases":[]}');
-    const fallbackResponse = orResponse('{"artists":["Found"],"discoveredAliases":[]}');
-    const fetchFn = async (_url, opts) => {
-      const body = JSON.parse(opts.body);
-      calls.push(body.model);
-      if (body.model === PRIMARY) return new Response(JSON.stringify(emptyResponse));
-      return new Response(JSON.stringify(fallbackResponse));
-    };
-    const result = await extractArtists('some messy content here', { type: 'messy-text', fetchFn });
-    expect(calls).toEqual([PRIMARY, FALLBACK]);
-    expect(result.artists).toEqual(['Found']);
+  it('propagates a proxy failure', async () => {
+    const fetchFn = async () => new Response('busy', { status: 429 });
+    await expect(
+      extractArtists('some messy lineup text', { type: 'messy-text', fetchFn }),
+    ).rejects.toThrow(/429/);
   });
 });

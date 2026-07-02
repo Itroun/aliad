@@ -215,7 +215,7 @@ async function callModel(apiKey, model, system, userContent) {
     body: JSON.stringify({
       model,
       max_tokens: 4096,
-      // Mirror prod (extract.js callLLM): constrain the reply to { artists: [] }.
+      // Mirror prod (server/api/openrouter.js): constrain the reply to { artists: [] }.
       // Without it, larger pages drift into prose/fences and bloat past max_tokens
       // — measuring the unconstrained shape would misrepresent prod behaviour.
       response_format: ARTIST_SCHEMA,

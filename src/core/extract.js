@@ -1,6 +1,5 @@
 import { parseLineup } from '../ui/inputScreen.js';
 import { dedupeNames } from './merge.js';
-import { PRIMARY, FALLBACK } from './models.js';
 
 // Prompts + reply schema live in a UI-free module so the Worker can apply the
 // same prompt server-side (it builds the LLM request now, not the client).
@@ -17,7 +16,7 @@ export function detectInputType(text) {
   if (hasCommaSeparatedNames) return 'messy';
 
   const hasBullets = lines.some(
-    (line) => /^\s*[\u2022\-\*]\s/.test(line) || /^\s*\d+[\.\)]\s/.test(line),
+    (line) => /^\s*[•\-\*]\s/.test(line) || /^\s*\d+[\.\)]\s/.test(line),
   );
   if (hasBullets) return 'messy';
 
@@ -30,6 +29,12 @@ export function detectInputType(text) {
   return 'clean';
 }
 
+// Resolve a chunk of input to a list of act names. Clean one-per-line text is
+// parsed locally; anything messy (loose text or scraped HTML) goes to the
+// extraction proxy. The proxy now owns model-tier selection — it tries the cheap
+// model and escalates to the stronger one server-side — so we send only
+// { kind, content } and read back the finished artist list plus per-call meta
+// for the dev-probe.
 export async function extractArtists(content, { type, signal, fetchFn = fetch, onCall } = {}) {
   if (type === 'clean-text') {
     return { artists: parseLineup(content) };
@@ -42,43 +47,21 @@ export async function extractArtists(content, { type, signal, fetchFn = fetch, o
   const kind = type === 'html' ? 'html' : 'text';
   const trimmed = content.trim();
 
-  // The primary can fail outright — a noisy page makes it truncate past
-  // max_tokens, leaving unparseable JSON that throws here. Treat that the same as
-  // a weak result: retry with the stronger model rather than dropping the page
-  // (the caller skips a thrown extraction). Only when BOTH fail do we propagate.
-  let result = null;
-  let primaryFailed = false;
-  try {
-    result = await timedCall(PRIMARY, kind, trimmed, { signal, fetchFn }, onCall, trimmed.length);
-  } catch (err) {
-    if (isAbort(err, signal)) throw err;
-    primaryFailed = true;
-  }
+  const { artists, meta } = await callExtract({ kind, content: trimmed }, { signal, fetchFn });
 
-  const primaryCount = Array.isArray(result?.artists) ? result.artists.length : 0;
-  if (primaryFailed || looksUnderExtracted(result?.artists, trimmed.length)) {
-    try {
-      const fallbackResult = await timedCall(
-        FALLBACK,
-        kind,
-        trimmed,
-        { signal, fetchFn },
-        onCall,
-        trimmed.length,
-      );
-      const fallbackCount = Array.isArray(fallbackResult.artists)
-        ? fallbackResult.artists.length
-        : 0;
-      if (primaryFailed || fallbackCount >= primaryCount) result = fallbackResult;
-    } catch (err) {
-      if (isAbort(err, signal) || primaryFailed) throw err;
-      // Fallback failed but the primary succeeded — keep the primary result.
+  // Surface each server-side model call to the dev-probe (0, 1, or 2 of them).
+  if (onCall && Array.isArray(meta?.calls)) {
+    for (const call of meta.calls) {
+      onCall({
+        model: call.model,
+        inputChars: trimmed.length,
+        outputArtists: call.outputArtists,
+        durationMs: call.durationMs,
+      });
     }
   }
 
-  return {
-    artists: Array.isArray(result?.artists) ? result.artists : [],
-  };
+  return { artists: Array.isArray(artists) ? artists : [] };
 }
 
 // Merge the artist lists from several extractions (e.g. one festival lineup page
@@ -91,43 +74,17 @@ export function combineExtractions(lists) {
   return { artists: dedupeNames(names) };
 }
 
-// A user-cancelled run must propagate immediately, never be retried/swallowed.
-function isAbort(err, signal) {
-  return err?.name === 'AbortError' || !!signal?.aborted;
-}
-
-export function looksUnderExtracted(artists, inputChars) {
-  const n = Array.isArray(artists) ? artists.length : 0;
-  if (n === 0) return inputChars > 20;
-  if (inputChars < 2000) return false;
-  const expected = Math.min(20, Math.max(5, Math.floor(inputChars / 800)));
-  return n < expected;
-}
-
-async function timedCall(model, kind, content, { signal, fetchFn }, onCall, inputChars) {
-  const start = Date.now();
-  const result = await callLLM({ model, kind, content }, { signal, fetchFn });
-  onCall?.({
-    model,
-    inputChars,
-    outputArtists: Array.isArray(result?.artists) ? result.artists.length : 0,
-    durationMs: Date.now() - start,
-  });
-  return result;
-}
-
-export async function callLLM({ model, kind, content }, { signal, fetchFn = fetch }) {
-  // The server (server/api/openrouter.js) owns the system prompt, reply schema,
-  // model allowlist and token cap — we send only the model tier, the prompt kind
-  // ('html' | 'text') and the text to extract from. That keeps the proxy a narrow
-  // extractor (no arbitrary-message passthrough), so it can't be abused as a
-  // free general-purpose LLM. The reply is still the OpenAI chat-completions
-  // shape: text at choices[0].message.content.
+// POST the text to the extraction proxy and read back { artists, meta }. The
+// server owns the system prompt, reply schema, model allowlist, token cap AND
+// the cheap→expensive tier selection — we send only the prompt kind and the text
+// to extract from. So the endpoint stays a narrow extractor (no arbitrary
+// messages, no client-chosen model) and can't be abused as a free LLM.
+export async function callExtract({ kind, content }, { signal, fetchFn = fetch } = {}) {
   const response = await fetchFn('/api/openrouter', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     signal,
-    body: JSON.stringify({ model, kind, content }),
+    body: JSON.stringify({ kind, content }),
   });
 
   if (!response.ok) {
@@ -136,17 +93,8 @@ export async function callLLM({ model, kind, content }, { signal, fetchFn = fetc
   }
 
   const data = await response.json();
-  const raw = data?.choices?.[0]?.message?.content ?? '';
-
-  return parseJSON(raw);
-}
-
-function parseJSON(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fenced) return JSON.parse(fenced[1].trim());
-    throw new Error('Failed to parse LLM response as JSON');
-  }
+  return {
+    artists: Array.isArray(data?.artists) ? data.artists : [],
+    meta: data?.meta,
+  };
 }
