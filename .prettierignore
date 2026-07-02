@@ -2,6 +2,6 @@ dist
 node_modules
 package-lock.json
 tests/fixtures
-CLAUDE.md
-TODO.md
-ACCESSIBILITY.md
+# markdown is prose, not code — don't gate formatting on it (covers README,
+# CLAUDE.md, TODO.md, planning docs, etc.; matches *.md at any depth)
+*.md
