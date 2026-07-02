@@ -69,7 +69,7 @@ export function toPlainText(model) {
 
   if (singletons.length) {
     const heading = noConnectionsHeading(singletons.length);
-    const lines = [heading, '-'.repeat(heading.length), ...singletons];
+    const lines = [heading, '='.repeat(heading.length), ...singletons];
     blocks.push(lines.join('\n'));
   }
 
