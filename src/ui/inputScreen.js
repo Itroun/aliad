@@ -83,6 +83,10 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
           <span class="readout-icon" aria-hidden="true">&#x2726;</span>
           <span class="readout-text"></span>
         </div>
+        <p class="field-error" role="status" aria-live="polite">
+          <span class="field-error-icon" aria-hidden="true">&#x26A0;</span>
+          <span class="field-error-text"></span>
+        </p>
       </div>
 
       <div class="decode-row">
@@ -105,6 +109,8 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   const exampleBtn = root.querySelector('.example-btn');
   const readout = root.querySelector('.field-readout');
   const readoutText = root.querySelector('.readout-text');
+  const errorLine = root.querySelector('.field-error');
+  const errorText = root.querySelector('.field-error-text');
 
   // Match the column beneath the hero (paste field, button row, footer rule) to
   // the rendered width of the "Who's performing?" title. The title scales with
@@ -124,7 +130,24 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   // events can't re-enable the button mid-flight.
   let busy = false;
 
+  // Surface a failure (URL fetch died, extraction came back empty) that would
+  // otherwise only reach the console. The error line stays in the DOM (never
+  // `hidden`) so its aria-live region reliably announces — some screen readers
+  // stay silent if a live region is un-hidden with content already in it. We
+  // mutate its text inside the live region and toggle visibility via a class.
+  function setError(message) {
+    errorText.textContent = message;
+    errorLine.classList.add('is-shown');
+  }
+
+  function clearError() {
+    if (!errorLine.classList.contains('is-shown')) return;
+    errorText.textContent = '';
+    errorLine.classList.remove('is-shown');
+  }
+
   function setBusy(label) {
+    clearError(); // a fresh run supersedes the last failure
     busy = true;
     root.classList.add('is-busy');
     decodeBtn.classList.add('is-busy');
@@ -200,6 +223,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
 
   textarea.addEventListener('input', () => {
     onCancel?.();
+    clearError(); // editing after a failure — drop the stale message
     if (justPasted) justPasted = false;
     else clearPasteState();
     updateReadout();
@@ -207,6 +231,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
 
   exampleBtn?.addEventListener('click', () => {
     textarea.value = EXAMPLE_LINEUP;
+    clearError(); // programmatic refill doesn't fire `input` — drop any stale error
     clearPasteState();
     pasteFormat = 'plain-text';
     updateReadout();
@@ -232,5 +257,5 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   root.querySelector('.topbar-tabs').append(tabs.el);
   mountThemeToggle(root.querySelector('.topbar'));
 
-  return { el: root, setActiveView: tabs.setActive, setBusy, clearBusy };
+  return { el: root, setActiveView: tabs.setActive, setBusy, clearBusy, setError, clearError };
 }

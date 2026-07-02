@@ -29,6 +29,7 @@
   --accent: #c9a85e; /* gold — links, highlights, lit edges */
   --accent-bright: #dcc084;
   --accent-pale: #f4d98a;
+  --danger: #f0938a; /* error text — readable on the dark --bg */
 
   --fg: #f5eedb; /* headline / bright text */
   --body: #ccd3de; /* body copy */
@@ -70,6 +71,7 @@
   --accent: #b23a2e; /* red — rhumb lines, links, progress */
   --accent-bright: #b23a2e;
   --accent-pale: #7a221a;
+  --danger: #9e2b20; /* error text — AA on the cream --bg */
 
   --fg: #1d3a5c; /* ink navy */
   --body: #42566a;
@@ -605,6 +607,36 @@ body > #app {
 .readout-icon {
   font-size: 0.5625rem;
   color: var(--accent);
+}
+
+/* Error line under the field — a failed fetch / empty extraction that otherwise
+   only hit the console. Same footprint as the readout, danger-coloured. Kept in
+   the DOM even when empty (never `hidden`) so its aria-live region announces
+   reliably; the visual footprint (margin + icon) appears only once .is-shown. */
+.field-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Reset the UA <p> margins: empty (not .is-shown) it must reserve no space,
+     since it stays in the DOM for the live region. */
+  margin: 0;
+  font-family: var(--ff-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--danger);
+}
+
+.field-error.is-shown {
+  margin-top: 12px;
+}
+
+.field-error:not(.is-shown) .field-error-icon {
+  display: none;
+}
+
+.field-error-icon {
+  font-size: 0.6875rem;
+  color: var(--danger);
 }
 
 .decode-row {

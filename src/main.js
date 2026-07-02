@@ -143,6 +143,7 @@ async function handleSubmit(input) {
       inputScreen.clearBusy();
       setView('input');
       console.warn('No artist names found in input.');
+      inputScreen.setError('No artist names found. Check the lineup text or link, then try again.');
       return;
     }
 
@@ -156,7 +157,18 @@ async function handleSubmit(input) {
     inputScreen.clearBusy();
     console.error(err);
     setView('input');
+    inputScreen.setError(userFacingError(err));
   }
+}
+
+// The generic fallback for an unexpected failure. The fetch/extract paths throw
+// their own guidance ("Try copying the text… and pasting it instead"); anything
+// without a message falls back to this rather than surfacing a raw stack.
+const GENERIC_ERROR = 'Something went wrong mapping that lineup. Please try again.';
+
+function userFacingError(err) {
+  const message = err?.message;
+  return typeof message === 'string' && message.trim() ? message : GENERIC_ERROR;
 }
 
 // Stage 2 → 3: given the resolved act names, persist them to the URL fragment
@@ -263,6 +275,7 @@ async function restoreFromHash(urlUpdate) {
     if (err?.name === 'AbortError' || signal.aborted) return;
     console.error(err);
     setView('input');
+    inputScreen.setError(userFacingError(err));
   });
 }
 
