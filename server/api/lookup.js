@@ -83,35 +83,76 @@ function isResultEmpty(result) {
   );
 }
 
-async function getJson(url, headers, fetchFn, retry, sleep) {
+// Fold one fetchWithRetry outcome into the per-lookup stats collector. Every
+// attempt is one real upstream HTTP request — the unit both providers' rate
+// limits count — so `calls` includes retries.
+function recordAttempts(stats, attempts) {
+  if (!stats || !Array.isArray(attempts)) return;
+  stats.calls += attempts.length;
+  stats.retries += Math.max(0, attempts.length - 1);
+  for (const a of attempts) if (a.status === 429) stats.status429++;
+}
+
+async function getJson(url, headers, fetchFn, retry, sleep, stats) {
   const result = await fetchWithRetry(url, { headers }, { fetchFn, sleep, ...(retry ?? {}) });
+  recordAttempts(stats, result.attempts);
   if (!result.ok) throw new Error(`upstream ${result.status ?? result.reason} for ${url}`);
   return result.response.json();
 }
 
 // The full pure pipeline: search → pick best candidate → details → map. Runs
 // the same selection/mapping as the browser used to, now server-side.
-async function lookupUpstream(cfg, env, name, fetchFn, sleep) {
+// Mutates `stats` (calls/retries/429s/gate wait) as it goes so the collector is
+// meaningful even when the pipeline throws mid-way (the STALE/502 paths).
+async function lookupUpstream(cfg, env, name, fetchFn, sleep, stats, priority) {
   const headers = cfg.headers(env);
-  // Each upstream HTTP request consumes one slot from the global gate, so the
-  // budget tracks what Discogs actually counts (search AND details).
-  const gate = () => (cfg.gated ? awaitDiscogsSlot(env, { sleep }) : undefined);
-  await gate();
-  const searchData = await getJson(cfg.searchUrl(name), headers, fetchFn, cfg.retry, sleep);
+  // Gate at the WIRE level, not per logical call: every attempt fetchWithRetry
+  // fires — retries included — takes one token, so the outbound rate can never
+  // exceed the bucket rate. Gating only the first attempt is how a run death-
+  // spirals: once the upstream 429s, each granted lookup fires extra ungated
+  // retries, holding the provider above its window exactly when the rate needs
+  // to drop (measured: a cold lineup's Discogs side collapsed this way).
+  const wireFetch = !cfg.gated
+    ? fetchFn
+    : async (url, init) => {
+        stats.gateWaitMs += await awaitDiscogsSlot(env, { sleep, priority });
+        return fetchFn(url, init);
+      };
+  const searchData = await getJson(
+    cfg.searchUrl(name),
+    headers,
+    wireFetch,
+    cfg.retry,
+    sleep,
+    stats,
+  );
   const match = cfg.pickMatch(searchData, name);
   if (!match) return emptyResult();
-  await gate();
-  const details = await getJson(cfg.detailsUrl(match.id), headers, fetchFn, cfg.retry, sleep);
+  const details = await getJson(
+    cfg.detailsUrl(match.id),
+    headers,
+    wireFetch,
+    cfg.retry,
+    sleep,
+    stats,
+  );
   return cfg.mapDetails(details);
 }
 
 /**
  * Cached lookup core, separated from request plumbing for testability.
- * @returns { status, body, cache } — body is a string; cache is the X-Cache label.
+ * @returns { status, body, cache, stats } — body is a string; cache is the
+ * X-Cache label. `stats` ({ calls, retries, status429, gateWaitMs }) is upstream
+ * telemetry for the dev-probe's cold-run accounting; it is only present when the
+ * upstream was actually consulted (MISS/STALE/BYPASS/502), never on a HIT.
+ *
+ * `priority` ('root' | 'expand', default 'root') is the rate-gate tier: the
+ * closure walk marks its expansion lookups 'expand' so cold roots across all
+ * concurrent streams get Discogs tokens first.
  */
 export async function handleLookup(
   env,
-  { provider, name, fetchFn = fetch, sleep, now = Date.now, store },
+  { provider, name, fetchFn = fetch, sleep, now = Date.now, store, priority = 'root' },
 ) {
   const cfg = PROVIDERS[provider];
   if (!cfg) return { status: 400, body: 'Unknown provider', cache: null };
@@ -119,16 +160,27 @@ export async function handleLookup(
     return { status: 500, body: 'Discogs token not configured', cache: null };
   }
 
-  const ok = (result, cache) => ({ status: 200, body: JSON.stringify(result), cache });
+  const ok = (result, cache, stats) => ({
+    status: 200,
+    body: JSON.stringify(result),
+    cache,
+    stats,
+  });
   const nameKey = normaliseName(name);
   if (!nameKey) return ok(emptyResult(), 'BYPASS');
+
+  const stats = { calls: 0, retries: 0, status429: 0, gateWaitMs: 0 };
 
   // store is injectable for tests; default to the D1-backed adapter when bound.
   const graph = store ?? (env?.DB ? makeD1Store(env.DB) : null);
 
   // Degraded: no D1 bound → straight upstream, no caching (same posture as kvLimit).
   if (!graph) {
-    return ok(await lookupUpstream(cfg, env, name, fetchFn, sleep), 'BYPASS');
+    return ok(
+      await lookupUpstream(cfg, env, name, fetchFn, sleep, stats, priority),
+      'BYPASS',
+      stats,
+    );
   }
 
   const sourceKey = sourceKeyFor(provider, nameKey);
@@ -152,17 +204,17 @@ export async function handleLookup(
 
   let result;
   try {
-    result = await lookupUpstream(cfg, env, name, fetchFn, sleep);
+    result = await lookupUpstream(cfg, env, name, fetchFn, sleep, stats, priority);
   } catch (err) {
     // Stale-on-error: serve a prior (expired) entry's quads rather than failing.
     if (lookupRow) {
       try {
-        return ok(await reconstitute(), 'STALE');
+        return ok(await reconstitute(), 'STALE', stats);
       } catch {
         // fall through to the 502 below
       }
     }
-    return { status: 502, body: 'Upstream lookup failed', cache: null };
+    return { status: 502, body: 'Upstream lookup failed', cache: null, stats };
   }
 
   const isEmpty = isResultEmpty(result);
@@ -182,7 +234,7 @@ export async function handleLookup(
   } catch {
     // Write failed — still serve the fresh result this request.
   }
-  return ok(result, 'MISS');
+  return ok(result, 'MISS', stats);
 }
 
 export async function handle(context) {

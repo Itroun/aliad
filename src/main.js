@@ -202,6 +202,7 @@ async function runLineup(artists, signal, { urlUpdate = 'replace', view = 'graph
   replaceGraphScreen(graph);
   setView(view);
 
+  const lookupStartedAt = performance.now();
   await lookupAll(artists, {
     signal,
     onProviderResult: (artist, provider, outcome) => {
@@ -212,6 +213,11 @@ async function runLineup(artists, signal, { urlUpdate = 'replace', view = 'graph
         serverCache: outcome.serverCache,
       });
       if (outcome.serverCache) devProbe.serverCache(outcome.serverCache);
+      devProbe.lookupStats(provider, {
+        serverCache: outcome.serverCache,
+        ok: outcome.ok,
+        stats: outcome.stats,
+      });
     },
     onArtistDone: (artist, merged) => {
       if (signal.aborted) return;
@@ -228,6 +234,7 @@ async function runLineup(artists, signal, { urlUpdate = 'replace', view = 'graph
   });
 
   if (signal.aborted) return;
+  devProbe.note(`lookups done · ${((performance.now() - lookupStartedAt) / 1000).toFixed(1)}s`);
   graph.finalize();
 }
 
@@ -448,13 +455,24 @@ function formatProviderNote(artist, provider, outcome) {
   // the root's own lookup.
   const label = outcome.via ? `via ${outcome.via}` : 'root';
   const serverTag = outcome.serverCache ? ` · L2:${outcome.serverCache}` : '';
-  const suffix = (outcome.cached ? ' · cached' : '') + serverTag;
+  const suffix = (outcome.cached ? ' · cached' : '') + serverTag + formatStatsTag(outcome.stats);
   if (!outcome.ok) {
     const reason = outcome.error?.message || 'failed';
     return `${label} · ${provider} · error: ${reason}${suffix}`;
   }
   const counts = summariseResult(outcome.result);
   return `${label} · ${provider} · ${counts || 'no data'}${suffix}`;
+}
+
+// Per-node upstream cost, present only on cold lookups. Flags the pathological
+// nodes: long gate waits and 429 retries stand out in the act's detail list.
+function formatStatsTag(stats) {
+  if (!stats) return '';
+  const parts = [`${stats.calls} calls`];
+  if (stats.status429) parts.push(`429×${stats.status429}`);
+  else if (stats.retries) parts.push(`${stats.retries} retries`);
+  if (stats.gateWaitMs >= 100) parts.push(`gate ${(stats.gateWaitMs / 1000).toFixed(1)}s`);
+  return ` · ${parts.join(' · ')}`;
 }
 
 function summariseResult(r) {

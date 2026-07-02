@@ -215,6 +215,183 @@ describe('handleLookup', () => {
     expect(res.status).toBe(500);
   });
 
+  it('reports upstream stats on a MISS and omits them on a HIT', async () => {
+    const store = fakeStore();
+    const args = {
+      provider: 'musicbrainz',
+      name: 'Test Artist',
+      fetchFn: mbFetch(),
+      now: () => 1_000_000,
+      store,
+    };
+
+    const first = await handleLookup({}, args);
+    expect(first.cache).toBe('MISS');
+    expect(first.stats).toEqual({ calls: 2, retries: 0, status429: 0, gateWaitMs: 0 });
+
+    const second = await handleLookup({}, args);
+    expect(second.cache).toBe('HIT');
+    expect(second.stats).toBeUndefined();
+  });
+
+  it('counts retries and 429s in the stats', async () => {
+    const store = fakeStore();
+    let searchTries = 0;
+    const fetchFn = async (url) => {
+      if (url.includes('/artist?')) {
+        searchTries++;
+        if (searchTries === 1) return { ok: false, status: 429, headers: { get: () => null } };
+        return { ok: true, status: 200, json: async () => MB_SEARCH };
+      }
+      if (url.includes('/artist/mb1'))
+        return { ok: true, status: 200, json: async () => MB_DETAILS };
+      throw new Error(`unexpected fetch: ${url}`);
+    };
+    const res = await handleLookup(
+      {},
+      {
+        provider: 'musicbrainz',
+        name: 'Test Artist',
+        fetchFn,
+        sleep: () => {},
+        now: () => 1,
+        store,
+      },
+    );
+    expect(res.cache).toBe('MISS');
+    // 2 search attempts (429 then ok) + 1 details = 3 upstream calls.
+    expect(res.stats).toEqual({ calls: 3, retries: 1, status429: 1, gateWaitMs: 0 });
+  });
+
+  it('accumulates Discogs gate wait time in the stats', async () => {
+    const store = fakeStore();
+    // Rate-limiter DO fake: first take denied (wait 40ms), then granted.
+    let takes = 0;
+    const env = {
+      DISCOGS_TOKEN: 'tok',
+      RATE_LIMITER: {
+        idFromName: (name) => name,
+        get: () => ({
+          fetch: async () => ({
+            json: async () => (++takes === 1 ? { granted: false, waitMs: 40 } : { granted: true }),
+          }),
+        }),
+      },
+    };
+    const fetchFn = fakeFetch([
+      ['/database/search', { results: [{ id: 7, title: 'Test Artist' }] }],
+      ['/artists/7', { id: 7, aliases: [], groups: [], members: [] }],
+    ]);
+    const res = await handleLookup(env, {
+      provider: 'discogs',
+      name: 'Test Artist',
+      fetchFn,
+      sleep: () => {},
+      now: () => 1,
+      store,
+    });
+    expect(res.cache).toBe('MISS');
+    expect(res.stats.gateWaitMs).toBe(40);
+    expect(res.stats.calls).toBe(2);
+  });
+
+  it('gates every wire attempt, retries included', async () => {
+    const store = fakeStore();
+    let takes = 0;
+    const env = {
+      DISCOGS_TOKEN: 'tok',
+      RATE_LIMITER: {
+        idFromName: (name) => name,
+        get: () => ({
+          fetch: async () => {
+            takes++;
+            return { json: async () => ({ granted: true }) };
+          },
+        }),
+      },
+    };
+    // Search 429s once, then succeeds; details succeeds: 3 wire attempts.
+    let searchTries = 0;
+    const fetchFn = async (url) => {
+      if (url.includes('/database/search')) {
+        searchTries++;
+        if (searchTries === 1) return { ok: false, status: 429, headers: { get: () => null } };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ results: [{ id: 7, title: 'Test Artist' }] }),
+        };
+      }
+      if (url.includes('/artists/7'))
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ id: 7, aliases: [], groups: [], members: [] }),
+        };
+      throw new Error(`unexpected fetch: ${url}`);
+    };
+    const res = await handleLookup(env, {
+      provider: 'discogs',
+      name: 'Test Artist',
+      fetchFn,
+      sleep: () => {},
+      now: () => 1,
+      store,
+    });
+    expect(res.cache).toBe('MISS');
+    expect(res.stats).toMatchObject({ calls: 3, retries: 1, status429: 1 });
+    // The retry attempt consumed a token too — wire rate can never exceed the
+    // bucket rate.
+    expect(takes).toBe(3);
+  });
+
+  it('forwards the priority tier to the rate gate', async () => {
+    const store = fakeStore();
+    const gateUrls = [];
+    const env = {
+      DISCOGS_TOKEN: 'tok',
+      RATE_LIMITER: {
+        idFromName: (name) => name,
+        get: () => ({
+          fetch: async (url) => {
+            gateUrls.push(url);
+            return { json: async () => ({ granted: true }) };
+          },
+        }),
+      },
+    };
+    const fetchFn = fakeFetch([['/database/search', { results: [] }]]);
+    await handleLookup(env, {
+      provider: 'discogs',
+      name: 'Test Artist',
+      fetchFn,
+      now: () => 1,
+      store,
+      priority: 'expand',
+    });
+    expect(gateUrls[0]).toContain('priority=expand');
+  });
+
+  it('carries the failed attempts in stats on a 502', async () => {
+    const store = fakeStore();
+    const failing = async () => ({ ok: false, status: 429, headers: { get: () => null } });
+    const res = await handleLookup(
+      {},
+      {
+        provider: 'musicbrainz',
+        name: 'Test Artist',
+        fetchFn: failing,
+        sleep: () => {},
+        now: () => 1,
+        store,
+      },
+    );
+    expect(res.status).toBe(502);
+    // MB retry config: 5 attempts, all 429.
+    expect(res.stats.calls).toBe(5);
+    expect(res.stats.status429).toBe(5);
+  });
+
   it('runs the Discogs pipeline when a token is present', async () => {
     const store = fakeStore();
     const search = { results: [{ id: 7, title: 'Test Artist' }] };

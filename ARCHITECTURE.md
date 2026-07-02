@@ -162,9 +162,21 @@ Both lookups go through `/api/lookup`, which injects credentials server-side
   **best-effort** — the per-IP cap on `/api/lookup` is abuse protection, not MB's
   limit, so concurrent cold lookups can still stampede past 1/sec; we accept that
   (gating MB would serialise big cold runs into multi-minute crawls).
-- **Discogs.** Requires a personal access token; 60 req/min authenticated. Enforced
-  globally by the RateLimiter DO token bucket so parallel closures can't stampede
-  it. `fetchWithRetry` (honouring `Retry-After`, capped 60 s) is the backstop.
+- **Discogs.** Requires a personal access token; 60 req/min authenticated as a
+  **rolling window**. Enforced globally by the RateLimiter DO token bucket, sized
+  to the invariant `capacity + refill/min ≤ 60` (5 + 54 = 59): a cold run drains
+  the burst plus a full minute's refill into Discogs's first window, and a 10+55
+  sizing was measured to trip a sustained 429 spiral. Every **wire attempt**
+  (retries included) consumes a token, so the outbound rate can never exceed the
+  bucket rate even mid-incident; `fetchWithRetry` (honouring `Retry-After`, capped
+  60 s) is the backstop. The bucket is **two-tier**: cold *root* lookups take
+  tokens freely, while *expansion* lookups (`priority=expand`) only succeed above
+  a reserve floor — so on a cold lineup every act's headline data lands before any
+  act's deep walk, and the long tail of a big cold run is background enrichment
+  rather than blocking. An expand waiter that outlives its wait budget is promoted
+  to the root tier (still gated), never let through ungated. A measured fully-cold
+  large lineup is Discogs-budget-bound wall-to-wall (calls ÷ refill ≈ total time),
+  which is why scheduling, not throughput, is the lever.
 - **Transient errors.** 429 / 5xx retry with backoff + jitter; anything else
   surfaces as a provider failure — the node usually still has data from the other
   provider, and a warm re-run clears it.

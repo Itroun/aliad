@@ -59,6 +59,7 @@ export async function runClosure(
       let ok = true;
       let cache = null;
       let result;
+      let stats;
       try {
         const res = await handleLookup(env, {
           provider,
@@ -67,9 +68,14 @@ export async function runClosure(
           fetchFn,
           sleep,
           now,
+          // Rate-gate tier: cold ROOT lookups across all concurrent streams
+          // take Discogs tokens ahead of expansion, so every act's headline
+          // data lands before any act's deep walk (see server/rateLimiter.js).
+          priority: isRoot ? 'root' : 'expand',
         });
         ok = res.status === 200;
         cache = res.cache;
+        stats = res.stats;
         // res.body is this provider's mapped result (JSON) on success; carry it
         // so the browser's dev-probe can show per-provider counts as before.
         if (ok && res.body) {
@@ -91,6 +97,9 @@ export async function runClosure(
         result,
         cached: cache === 'HIT',
         serverCache: cache ?? undefined,
+        // Upstream telemetry (calls/retries/429s/gate wait) — only present when
+        // the lookup actually hit the upstream; the dev-probe sums it per run.
+        stats,
       });
     }
     // Cross-provider, cross-lookup union for this node.

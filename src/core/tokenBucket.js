@@ -19,12 +19,20 @@ export function refill(state, now, { capacity, refillPerSec }) {
 
 // Attempt to take one token. Returns the next state plus whether it was granted
 // and, if not, how long to wait before a token will be available.
+//
+// `reserve` (default 0) is the priority mechanism: a taker only succeeds while
+// the bucket holds MORE than `reserve` tokens, so a positive reserve makes this
+// taker yield to reserve-0 takers whenever the bucket runs hot — the low tier
+// only drinks once the bucket has filled past the floor the high tier never
+// lets it reach while it still has demand. No queue, no coordination: strict
+// priority falls out of the admission threshold alone.
 export function take(state, now, opts) {
   const refilled = refill(state, now, opts);
-  if (refilled.tokens >= 1) {
+  const threshold = 1 + (opts.reserve ?? 0);
+  if (refilled.tokens >= threshold) {
     return { state: { ...refilled, tokens: refilled.tokens - 1 }, granted: true, waitMs: 0 };
   }
-  const deficit = 1 - refilled.tokens;
+  const deficit = threshold - refilled.tokens;
   const waitMs = Math.ceil((deficit / opts.refillPerSec) * 1000);
   return { state: refilled, granted: false, waitMs };
 }

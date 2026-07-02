@@ -117,6 +117,8 @@ describe('runClosure (SSE endpoint core)', () => {
       (p) => p.name === 'Shpongle' && p.provider === 'musicbrainz',
     );
     expect(mbRoot.serverCache).toBe('HIT');
+    // A HIT never consulted the upstream, so it carries no stats.
+    expect(mbRoot.stats).toBeUndefined();
     expect(of('progress').length).toBeGreaterThan(0);
   });
 
@@ -169,11 +171,54 @@ describe('runClosure (SSE endpoint core)', () => {
       .find((p) => p.name === 'Solo Artist' && p.provider === 'musicbrainz');
     expect(mb.serverCache).toBe('MISS');
     expect(mb.ok).toBe(true);
+    // Cold lookup → the event carries the upstream telemetry (search + details).
+    expect(mb.stats).toEqual({ calls: 2, retries: 0, status429: 0, gateWaitMs: 0 });
     // The fetched result was decomposed into the substrate.
     expect(store.lookups.has('musicbrainz:solo artist')).toBe(true);
     const [done] = cap.of('done');
     expect(done.merged.aliases.map((a) => a.name)).toContain('SA');
     expect(done.queried).toContain('musicbrainz');
+  });
+
+  it('takes rate-gate tokens at root priority for the root, expand for interior nodes', async () => {
+    const store = fakeStore();
+    const gateUrls = [];
+    const envWithGate = {
+      DISCOGS_TOKEN: 'tok',
+      RATE_LIMITER: {
+        idFromName: (name) => name,
+        get: () => ({
+          fetch: async (url) => {
+            gateUrls.push(url);
+            return { json: async () => ({ granted: true }) };
+          },
+        }),
+      },
+    };
+    // Root has one walkable alias so the walk does exactly one interior lookup;
+    // Discogs searches return no match (one gated call per node).
+    const fetchFn = benignFetch([
+      [
+        '/artist?query=artist%3A%22Solo',
+        { artists: [{ id: 'mb1', name: 'Solo Artist', score: 100 }] },
+      ],
+      ['/artist/mb1', { id: 'mb1', aliases: [{ name: 'Second Self' }], relations: [] }],
+    ]);
+
+    const cap = capture();
+    await runClosure(envWithGate, {
+      root: 'Solo Artist',
+      roots: ['Solo Artist'],
+      store,
+      now: () => 1,
+      fetchFn,
+      emit: cap.emit,
+    });
+
+    const tiers = gateUrls.map((u) => new URL(u).searchParams.get('priority'));
+    expect(tiers[0]).toBe('root');
+    expect(tiers).toContain('expand');
+    expect(tiers.filter((t) => t === 'root').length).toBe(1);
   });
 
   it('emits an error event when no graph substrate is available', async () => {

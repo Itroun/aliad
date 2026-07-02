@@ -5,6 +5,7 @@ const NOOP_PROBE = {
   note() {},
   providerResult() {},
   serverCache() {},
+  lookupStats() {},
 };
 
 export function createDevProbe() {
@@ -27,19 +28,24 @@ export function createDevProbe() {
   const actGroups = new Map();
   const serverTally = { HIT: 0, MISS: 0, STALE: 0 };
 
-  // Run-wide L2 (D1 quad store) cache roll-up. Created eagerly and pinned as the
-  // first list item so it reads as a header summary, rather than getting buried
-  // under whichever act happened to resolve first (which is where lazy creation
-  // used to drop it).
-  const serverCacheRow = document.createElement('li');
-  serverCacheRow.className = 'dev-probe-item state-info';
+  // Run-wide summary block: the L2 (D1 quad store) cache roll-up plus one
+  // upstream-stats line per provider. Created eagerly and pinned as the first
+  // list item so it reads as a header summary, rather than getting buried under
+  // whichever act happened to resolve first (which is where lazy creation used
+  // to drop it).
+  const summaryRow = document.createElement('li');
+  summaryRow.className = 'dev-probe-item state-info';
+  const serverCacheLine = document.createElement('div');
+  summaryRow.append(serverCacheLine);
+  // provider name -> { line: div, tally } for the per-provider upstream stats.
+  const providerStats = new Map();
   function renderServerCache() {
-    serverCacheRow.textContent =
+    serverCacheLine.textContent =
       `server-cache · HIT=${serverTally.HIT}` +
       ` · MISS=${serverTally.MISS} · STALE=${serverTally.STALE}`;
   }
   renderServerCache();
-  list.append(serverCacheRow);
+  list.append(summaryRow);
 
   function reset() {
     rows.clear();
@@ -47,8 +53,10 @@ export function createDevProbe() {
     serverTally.HIT = 0;
     serverTally.MISS = 0;
     serverTally.STALE = 0;
+    providerStats.clear();
+    summaryRow.replaceChildren(serverCacheLine);
     renderServerCache();
-    list.replaceChildren(serverCacheRow);
+    list.replaceChildren(summaryRow);
     el.hidden = true;
   }
 
@@ -65,11 +73,11 @@ export function createDevProbe() {
       list.append(li);
     }
 
-    // Keep the run-wide server-cache summary pinned directly beneath the fetch
+    // Keep the run-wide summary block pinned directly beneath the fetch
     // attempt rows (just under "direct → ok") rather than above them. With no
     // fetch row (e.g. pasted text) it stays at the top.
-    if (li.nextSibling !== serverCacheRow) {
-      list.insertBefore(serverCacheRow, li.nextSibling);
+    if (li.nextSibling !== summaryRow) {
+      list.insertBefore(summaryRow, li.nextSibling);
     }
 
     li.className = `dev-probe-item state-${state}`;
@@ -157,5 +165,59 @@ export function createDevProbe() {
     renderServerCache();
   }
 
-  return { el, reset, onAttempt, note, providerResult, serverCache };
+  // Per-provider run roll-up: lookup + L2 outcome counts always; upstream call/
+  // retry/429/gate-wait totals when the server sent stats (cold lookups only).
+  // This is the cold-run cost accounting — one glance says which provider's
+  // budget the run actually spent (and wasted, via retries/429s).
+  function lookupStats(provider, { serverCache: label, ok = true, stats } = {}) {
+    if (!provider) return;
+    let entry = providerStats.get(provider);
+    if (!entry) {
+      const line = document.createElement('div');
+      summaryRow.append(line);
+      entry = {
+        line,
+        tally: {
+          lookups: 0,
+          HIT: 0,
+          MISS: 0,
+          STALE: 0,
+          err: 0,
+          calls: 0,
+          retries: 0,
+          status429: 0,
+          gateWaitMs: 0,
+        },
+      };
+      providerStats.set(provider, entry);
+    }
+
+    const t = entry.tally;
+    t.lookups++;
+    if (!ok) t.err++;
+    if (label in t) t[label]++;
+    if (stats) {
+      t.calls += stats.calls ?? 0;
+      t.retries += stats.retries ?? 0;
+      t.status429 += stats.status429 ?? 0;
+      t.gateWaitMs += stats.gateWaitMs ?? 0;
+    }
+
+    const cacheBits = [];
+    if (t.HIT) cacheBits.push(`H:${t.HIT}`);
+    if (t.MISS) cacheBits.push(`M:${t.MISS}`);
+    if (t.STALE) cacheBits.push(`S:${t.STALE}`);
+    const parts = [provider, `${t.lookups} lookups`];
+    if (cacheBits.length) parts.push(`L2 ${cacheBits.join('/')}`);
+    parts.push(`${t.calls} upstream calls`);
+    if (t.retries) parts.push(`${t.retries} retries`);
+    if (t.status429) parts.push(`429×${t.status429}`);
+    if (t.gateWaitMs) parts.push(`gate ${(t.gateWaitMs / 1000).toFixed(1)}s`);
+    if (t.err) parts.push(`${t.err} err`);
+    entry.line.textContent = parts.join(' · ');
+
+    el.hidden = false;
+  }
+
+  return { el, reset, onAttempt, note, providerResult, serverCache, lookupStats };
 }

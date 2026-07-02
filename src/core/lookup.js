@@ -106,6 +106,7 @@ async function streamClosure(name, roots, callbacks, { reportName }) {
           via: data.via,
           cached: data.cached,
           serverCache: data.serverCache,
+          stats: data.stats,
           error: data.ok ? undefined : new Error('lookup failed'),
         });
         break;
