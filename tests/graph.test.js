@@ -280,6 +280,27 @@ describe('buildGraph', () => {
     ]);
   });
 
+  it("renders a shared-band bridge from the band's perspective on both sides", () => {
+    // Two people share a band. One reached it directly (Monro is a member of
+    // Juice), the other via an alias (Dickster is Dick Trevor, who is in Juice),
+    // so relForEntry remaps the via side to a node-perspective "member of". In a
+    // bridge row the band is the subject, so both sides must read "group of" —
+    // "Juice — group of Dickster · group of Monro" — not the inverted
+    // "member of Dickster".
+    const per = [
+      entry('Dickster', { groups: [{ name: 'Juice', via: 'Dick Trevor' }] }),
+      entry('Monro', { groups: ['Juice'] }),
+    ];
+    const { clusters } = buildGraph(per);
+    const edge = clusters[0].edges[0];
+    const juice = edge.evidence.find((e) => e.person === 'Juice');
+    expect(juice).toBeTruthy();
+    expect(juice.hops).toEqual([
+      { rel: 'group of', with: 'Dickster' },
+      { rel: 'group of', with: 'Monro' },
+    ]);
+  });
+
   it('drops via-mediated side-project bridges when the two nodes are directly linked', () => {
     // Max is a member of Tecnica (direct, non-via link). Tecnica's *other*
     // member (Maurizio) is also in Pleiadians/Etnica, so those surface on

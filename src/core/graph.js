@@ -166,6 +166,26 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
   const ownerHops = (entry, root) =>
     (entry.owners ?? [{ name: root, rel: entry.rel }]).map((o) => ({ rel: o.rel, with: o.name }));
 
+  // Hops for a *bridge* row, where the shared identity is the subject and each
+  // node is the object ("Juice — group of Dickster · group of James Monro").
+  // Here the relation must read from the BRIDGE's perspective. relForEntry's
+  // alias-only via remap turns a group reached through an alias hop into a
+  // node-perspective "member of" — correct for a direct row (whose `with` is the
+  // group itself), but inverting here: "member of Dickster" reads as if Juice
+  // were a member of Dickster. Undo just that one remap. The member-step remap
+  // ("side project of" — the group is a side project of the node's member, not
+  // the node itself) is a genuinely different fact and stays, as does a real
+  // members-bucket "member of" (a person bridging two bands).
+  const bridgeRel = (rel, bucket) =>
+    rel === 'member of' && (bucket === 'groups' || bucket === 'relatedProjects')
+      ? BUCKET_TO_REL[bucket]
+      : rel;
+  const bridgeHops = (entry, root) =>
+    (entry.owners ?? [{ name: root, rel: entry.rel }]).map((o) => ({
+      rel: bridgeRel(o.rel, entry.bucket),
+      with: o.name,
+    }));
+
   // An "obvious" bridge: the shared identity is hosted by the SAME visibly-named
   // part on both sides — e.g. solo "Process" ↔ "Process vs Aether", or
   // "Process vs Aether" ↔ "Process vs Bob" (both labels literally say Process).
@@ -275,7 +295,7 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
     const row = {
       key,
       person: aEntry.displayName || bEntry.displayName,
-      hops: [...ownerHops(aEntry, A.name), ...ownerHops(bEntry, B.name)],
+      hops: [...bridgeHops(aEntry, A.name), ...bridgeHops(bEntry, B.name)],
     };
     // A bridge that is itself a combo part is circular — hold it back as a
     // fallback so the edge survives if it had no other evidence.
