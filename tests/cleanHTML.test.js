@@ -4,13 +4,16 @@ import { cleanHTML } from '../src/core/cleanHTML.js';
 
 describe('cleanHTML', () => {
   it('drops scripts, styles, and other noise elements', () => {
+    // Iframe is intentionally src-less: happy-dom navigates a real iframe src
+    // (→ network fetch + teardown noise). We only need it present to prove it's
+    // stripped. Link/script loading is disabled via vite.config.js env settings.
     const html = `
       <html><head><title>x</title></head><body>
         <script>evil()</script>
         <style>.a{color:red}</style>
         <noscript>nope</noscript>
         <svg><circle/></svg>
-        <iframe src="x"></iframe>
+        <iframe title="ad"></iframe>
         <p>keep me</p>
       </body></html>
     `;
