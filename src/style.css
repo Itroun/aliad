@@ -588,19 +588,26 @@ body > #app {
   color: var(--faint);
 }
 
-/* Live "what did we find" line under the field: links to fetch / acts to parse. */
+/* Live "what did we find" line under the field: links to fetch / acts to parse.
+   Kept in the DOM even when empty (never `hidden`) so its aria-live region
+   announces reliably; the visual footprint (margin + icon) appears only once
+   .is-shown — same pattern as .field-error. */
 .field-readout {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 12px;
+  margin: 0;
   font-family: var(--ff-mono);
   font-size: 0.6875rem;
   letter-spacing: 0.04em;
   color: var(--muted);
 }
 
-.field-readout[hidden] {
+.field-readout.is-shown {
+  margin-top: 12px;
+}
+
+.field-readout:not(.is-shown) .readout-icon {
   display: none;
 }
 

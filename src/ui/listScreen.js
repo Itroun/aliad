@@ -21,9 +21,10 @@ export function createListScreen({ onViewChange } = {}) {
       <div class="topbar-tabs"></div>
       <div class="topbar-right">
         <button type="button" class="list-copy" hidden>Copy as text</button>
+        <span class="visually-hidden" data-copy-status role="status" aria-live="polite"></span>
       </div>
     </header>
-    <section class="list-body">
+    <section class="list-body" aria-label="Lineup results">
       <div class="list-scroll"></div>
     </section>
   `;
@@ -35,6 +36,7 @@ export function createListScreen({ onViewChange } = {}) {
 
   const scroll = root.querySelector('.list-scroll');
   const copyBtn = root.querySelector('.list-copy');
+  const copyStatus = root.querySelector('[data-copy-status]');
 
   let model = { clusters: [], singletons: [] };
 
@@ -43,23 +45,30 @@ export function createListScreen({ onViewChange } = {}) {
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      flashCopied('Copied');
+      flashCopied('Copied', 'Lineup copied to clipboard');
     } catch {
       // Clipboard API unavailable / blocked (insecure context, denied perm):
       // select the text so the user can copy it manually.
       selectScrollText();
-      flashCopied('Press ⌘/Ctrl+C');
+      flashCopied(
+        'Press ⌘/Ctrl+C',
+        'Copy failed — text selected; press Control or Command plus C to copy',
+      );
     }
   });
 
   let copyResetTimer = null;
-  function flashCopied(label) {
+  // `label` is the visible button swap; `spoken` is the screen-reader wording
+  // (the ⌘ glyph reads poorly, and the outcome deserves an explicit announce).
+  function flashCopied(label, spoken) {
     copyBtn.textContent = label;
     copyBtn.classList.add('is-copied');
+    copyStatus.textContent = spoken || label;
     clearTimeout(copyResetTimer);
     copyResetTimer = setTimeout(() => {
       copyBtn.textContent = 'Copy as text';
       copyBtn.classList.remove('is-copied');
+      copyStatus.textContent = ''; // reset so an identical next copy re-announces
     }, 1600);
   }
 
@@ -113,7 +122,7 @@ export function createListScreen({ onViewChange } = {}) {
                     `<span class="list-rel">${escape(h.rel)}</span> ` +
                     `<span class="list-with">${escape(h.with)}</span>`,
                 )
-                .join('<span class="list-sep"> · </span>');
+                .join('<span class="list-sep" aria-hidden="true"> · </span>');
               return `
                 <li class="list-evidence">
                   <span class="list-person">${escape(ev.person)}</span>
@@ -125,7 +134,7 @@ export function createListScreen({ onViewChange } = {}) {
             <div class="list-edge">
               <div class="list-edge-title">
                 <span>${escape(edge.a)}</span>
-                <span class="list-edge-sep">↔</span>
+                <span class="list-edge-sep" aria-hidden="true">↔</span>
                 <span>${escape(edge.b)}</span>
               </div>
               <ul class="list-evidence-rows">${evRows}</ul>

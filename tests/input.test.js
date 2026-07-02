@@ -45,14 +45,16 @@ describe('createInputScreen', () => {
   it('starts with the Map button disabled and no readout', () => {
     mount();
     expect(root.querySelector('.decode-btn').disabled).toBe(true);
-    expect(root.querySelector('.field-readout').hidden).toBe(true);
+    // Readout stays in the DOM for its aria-live region; visibility is the
+    // `is-shown` class, not the `hidden` attribute.
+    expect(root.querySelector('.field-readout').classList.contains('is-shown')).toBe(false);
   });
 
   it('enables Map and reads out act count when text is entered', () => {
     mount();
     setText('Foo\nBar');
     expect(root.querySelector('.decode-btn').disabled).toBe(false);
-    expect(root.querySelector('.field-readout').hidden).toBe(false);
+    expect(root.querySelector('.field-readout').classList.contains('is-shown')).toBe(true);
     expect(root.querySelector('.readout-text').textContent).toContain('2 acts');
   });
 

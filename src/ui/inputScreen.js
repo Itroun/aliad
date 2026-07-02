@@ -79,7 +79,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
           rows="11"
           placeholder="${PLACEHOLDER}"
         ></textarea>
-        <div class="field-readout" hidden>
+        <div class="field-readout" role="status" aria-live="polite">
           <span class="readout-icon" aria-hidden="true">&#x2726;</span>
           <span class="readout-text"></span>
         </div>
@@ -87,6 +87,10 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
           <span class="field-error-icon" aria-hidden="true">&#x26A0;</span>
           <span class="field-error-text"></span>
         </p>
+        <!-- SR-only channel for transient busy phases ("Reading page 1 of 3…").
+             The phase label lives on the disabled Map button, which screen readers
+             won't announce, so it's mirrored here. -->
+        <p class="visually-hidden" data-busy-status role="status" aria-live="polite"></p>
       </div>
 
       <div class="decode-row">
@@ -110,6 +114,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   const readoutText = root.querySelector('.readout-text');
   const errorLine = root.querySelector('.field-error');
   const errorText = root.querySelector('.field-error-text');
+  const busyStatus = root.querySelector('[data-busy-status]');
 
   // Match the column beneath the hero (paste field, button row, footer rule) to
   // the rendered width of the "Who's performing?" title. The title scales with
@@ -152,6 +157,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
     decodeBtn.classList.add('is-busy');
     decodeBtn.disabled = true;
     decodeLabel.textContent = label;
+    busyStatus.textContent = label; // announce the phase to screen readers
   }
 
   function clearBusy() {
@@ -159,6 +165,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
     root.classList.remove('is-busy');
     decodeBtn.classList.remove('is-busy');
     decodeLabel.textContent = 'Map lineup';
+    busyStatus.textContent = '';
     updateReadout(); // restore the enabled/disabled state from current input
   }
 
@@ -178,13 +185,21 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
     decodeBtn.disabled = !hasInput;
 
     if (!hasInput) {
-      readout.hidden = true;
-      readoutText.textContent = '';
+      setReadout('');
       return;
     }
 
-    readout.hidden = false;
-    readoutText.textContent = describe(linkCount, actCount);
+    setReadout(describe(linkCount, actCount));
+  }
+
+  // Drive the readout's polite live region. Kept in the DOM (never `hidden`) and
+  // gated via `is-shown` — same pattern as the error line — so it announces
+  // reliably and reserves no space when empty. Guarded against re-writing an
+  // identical string so typing doesn't re-announce the same summary each keystroke.
+  function setReadout(text) {
+    if (readoutText.textContent === text) return;
+    readoutText.textContent = text;
+    readout.classList.toggle('is-shown', Boolean(text));
   }
 
   function describe(linkCount, actCount) {

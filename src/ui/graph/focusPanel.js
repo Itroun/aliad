@@ -24,17 +24,18 @@ export function createFocusPanel() {
     body.innerHTML = `<div class="panel-placeholder">Click a cluster to see its connections.</div>`;
   }
 
-  function edgeSection(edge) {
+  function edgeSection(edge, index) {
     const key = edgeKey(edge);
     const isOpen = expanded.get(key) !== false;
     const count = edge.evidence.length;
     const label = count === 1 ? 'connection' : 'connections';
+    const evidenceId = `conn-evidence-${index}`;
     const ev = edge.evidence
       .map((e, i) => {
         const hops = e.hops
           .map(
             (h, j) =>
-              (j > 0 ? '<span class="sep">·</span>' : '') +
+              (j > 0 ? '<span class="sep" aria-hidden="true">·</span>' : '') +
               `<span class="rel">${escape(h.rel)}</span>` +
               ' ' +
               `<span class="with">${escape(h.with)}</span>`,
@@ -56,14 +57,15 @@ export function createFocusPanel() {
       <div class="connection-edge" data-edge-key="${escape(key)}">
         <div class="connection-title">
           <span>${escape(edge.a)}</span>
-          <span class="connection-sep">↔</span>
+          <span class="connection-sep" aria-hidden="true">↔</span>
           <span>${escape(edge.b)}</span>
         </div>
-        <button type="button" class="connection-toggle ${isOpen ? 'is-expanded' : ''}">
-          <svg class="toggle-caret" width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M1 0l6 4-6 4z"/></svg>
+        <button type="button" class="connection-toggle ${isOpen ? 'is-expanded' : ''}"
+          aria-expanded="${isOpen}" aria-controls="${evidenceId}">
+          <svg class="toggle-caret" width="8" height="8" viewBox="0 0 8 8" fill="currentColor" aria-hidden="true"><path d="M1 0l6 4-6 4z"/></svg>
           <span>${count} ${label}</span>
         </button>
-        <div class="connection-evidence aliad-fadein ${isOpen ? 'is-open' : ''}">${ev}</div>
+        <div id="${evidenceId}" class="connection-evidence aliad-fadein ${isOpen ? 'is-open' : ''}">${ev}</div>
       </div>
     `;
   }
@@ -72,15 +74,17 @@ export function createFocusPanel() {
     const edges = cluster.edges;
 
     body.innerHTML = `
-      <div class="cluster-edges">${edges.map(edgeSection).join('')}</div>
+      <div class="cluster-edges">${edges.map((edge, i) => edgeSection(edge, i)).join('')}</div>
     `;
 
     body.querySelectorAll('.connection-edge').forEach((section) => {
       const key = section.getAttribute('data-edge-key');
-      section.querySelector('.connection-toggle').addEventListener('click', () => {
+      const toggle = section.querySelector('.connection-toggle');
+      toggle.addEventListener('click', () => {
         const next = expanded.get(key) === false;
         expanded.set(key, next);
-        section.querySelector('.connection-toggle').classList.toggle('is-expanded', next);
+        toggle.classList.toggle('is-expanded', next);
+        toggle.setAttribute('aria-expanded', String(next));
         section.querySelector('.connection-evidence').classList.toggle('is-open', next);
       });
     });
