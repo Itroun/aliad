@@ -69,9 +69,10 @@ function fakeKV(initial = {}) {
   };
 }
 
-function makeRequest(body, { ip = '9.9.9.9', method = 'POST' } = {}) {
+function makeRequest(body, { ip = '9.9.9.9', method = 'POST', signal } = {}) {
   return {
     method,
+    signal,
     headers: { get: (h) => (h === 'CF-Connecting-IP' ? ip : null) },
     json: async () => {
       if (body === Symbol.for('bad-json')) throw new Error('bad json');
@@ -101,6 +102,14 @@ function upstreamOk(artists) {
 }
 function upstreamErr(status, bodyText = 'UPSTREAM SECRET DETAIL') {
   return { ok: false, status, text: async () => bodyText };
+}
+// An ok (billed) upstream response whose completion body isn't valid JSON.
+function upstreamUnparseable() {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ choices: [{ message: { content: 'not json at all' } }] }),
+  };
 }
 
 function usageCount(env) {
@@ -165,6 +174,52 @@ describe('handle', () => {
       expect(sent.response_format).toEqual(ARTIST_SCHEMA);
     }
     // An escalation draws down two units of the daily budget, not one.
+    expect(usageCount(context.env)).toBe(2);
+  });
+
+  it('threads request.signal into the upstream fetch so escalation is cancellable', async () => {
+    const fetchMock = vi.fn(async () => upstreamOk(['One', 'Two']));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const { context, waited } = makeContext(
+      { kind: 'text', content: 'a short lineup' },
+      { signal: controller.signal },
+    );
+    await handle(context);
+    await Promise.all(waited);
+
+    // The upstream call must carry the client's abort signal; without it a
+    // superseded run would still complete the (expensive) fallback server-side.
+    expect(fetchMock).toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal);
+  });
+
+  it('records a billed-but-unparseable completion in meta so the call count matches billing', async () => {
+    const fetchMock = vi.fn(async (_url, opts) => {
+      const model = JSON.parse(opts.body).model;
+      // Cheap returns an ok-but-unparseable body (billed) → escalate; fallback ok.
+      return model === PRIMARY ? upstreamUnparseable() : upstreamOk(['A', 'B', 'C', 'D', 'E', 'F']);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { context, waited } = makeContext({ kind: 'html', content: 'x'.repeat(5000) });
+    const res = await handle(context);
+    await Promise.all(waited);
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.artists).toHaveLength(6);
+
+    // Both completions were billed AND both appear in meta (the first flagged as a
+    // parse failure), so telemetry agrees with the 2-unit budget draw-down.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(data.meta.calls).toHaveLength(2);
+    expect(data.meta.calls[0]).toMatchObject({
+      model: PRIMARY,
+      outputArtists: 0,
+      parseFailed: true,
+    });
     expect(usageCount(context.env)).toBe(2);
   });
 

@@ -25,12 +25,15 @@ const MAX_CONTENT_CHARS = 600_000;
 const RATE_LIMIT = 20;
 const RATE_WINDOW_SEC = 60;
 // Global per-day ceiling on upstream model CALLS (a cheap+fallback extraction is
-// two). The env var keeps its historical name for compatibility.
-const DEFAULT_DAILY_REQUEST_LIMIT = 300;
+// two), set by OPENROUTER_DAILY_CALL_LIMIT. Named for what it counts — model
+// calls, the real cost unit — not requests, since one request can bill two.
+const DEFAULT_DAILY_CALL_LIMIT = 300;
 const DAILY_COUNTER_KEY = 'openrouter:usage';
-// Per-IP daily sub-cap: no single source can eat the whole day's budget. Counts
-// extraction REQUESTS (each up to two model calls). Generous to tolerate shared
-// NAT / CGNAT; the global call-ceiling above is the real cost backstop.
+// Per-IP daily sub-cap so no single source dominates the day. Deliberately counts
+// extraction REQUESTS, not calls: it's a per-human fairness limit ("how many
+// lineups did you map today"), and kept generous to tolerate shared NAT / CGNAT
+// (many real users behind one IP). One IP thus contributes at most ~2x this many
+// calls to the global ceiling above, which stays the real cost backstop.
 const PER_IP_DAILY_LIMIT = 40;
 const DAY_SEC = 86_400;
 
@@ -83,7 +86,7 @@ export async function handle(context) {
     return new Response('Too many requests', { status: 429 });
   }
 
-  const dailyLimit = Number(env.OPENROUTER_DAILY_REQUEST_LIMIT) || DEFAULT_DAILY_REQUEST_LIMIT;
+  const dailyLimit = Number(env.OPENROUTER_DAILY_CALL_LIMIT) || DEFAULT_DAILY_CALL_LIMIT;
   const ceiling = await checkDailyCeiling(env, { key: DAILY_COUNTER_KEY, limit: dailyLimit });
   if (!ceiling.allowed) {
     return new Response('Daily request budget exhausted', { status: 503 });
@@ -123,6 +126,13 @@ export async function handle(context) {
   // provider's error detail to our client) or an unparseable completion, so
   // runExtraction treats it as a failed attempt and can escalate. A completion
   // that came back ok is billed regardless of parse outcome, so it counts.
+  //
+  // `request.signal` propagates a client disconnect into the upstream fetch:
+  // escalation runs entirely server-side now, so without this a superseded run
+  // (the user edits + re-submits) would still complete the expensive fallback
+  // call. On abort the primary fetch rejects; runExtraction's fallback attempt
+  // then hits the already-aborted signal and rejects immediately too, so no
+  // extra upstream call is made. (Mirrors server/api/closure.js's tracedFetch.)
   const meta = { calls: [] };
   let billedCalls = 0;
   const runModel = async (model) => {
@@ -137,29 +147,51 @@ export async function handle(context) {
         'X-Title': 'aliad',
       },
       body: JSON.stringify(buildPayload(model, { kind, content })),
+      signal: request.signal,
     });
     if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
+    // A completion that came back ok is billed here, so it MUST also be recorded
+    // in meta below — even if the body fails to parse — or the dev-probe's call
+    // count silently disagrees with what billing charged for.
     billedCalls += 1;
-    const data = await upstream.json();
-    const artists = parseArtists(data?.choices?.[0]?.message?.content ?? '');
-    meta.calls.push({ model, outputArtists: artists.length, durationMs: Date.now() - start });
+    let artists = null;
+    let parseFailed = false;
+    try {
+      const data = await upstream.json();
+      artists = parseArtists(data?.choices?.[0]?.message?.content ?? '');
+    } catch {
+      parseFailed = true;
+    }
+    meta.calls.push({
+      model,
+      outputArtists: artists?.length ?? 0,
+      durationMs: Date.now() - start,
+      ...(parseFailed && { parseFailed: true }),
+    });
+    // Signal a failed attempt to runExtraction so it escalates / propagates,
+    // without leaking the upstream body.
+    if (parseFailed) throw new Error('unparseable completion');
     return { artists };
   };
 
   let result;
+  let failed = false;
   try {
     result = await runExtraction({ inputChars: content.length, runModel });
   } catch {
-    // Every model attempt failed. Charge for any completions we were billed for,
-    // then return a generic error — never the upstream's body.
-    if (billedCalls > 0) {
-      context.waitUntil?.(incrementDailyCeiling(env, ceiling.storageKey, billedCalls));
-    }
-    return new Response('Extraction failed', { status: 502 });
+    failed = true;
   }
 
+  // Charge for every completion we were billed for (each ok upstream response
+  // counts, even one that failed to parse), in one place regardless of the
+  // overall outcome.
   if (billedCalls > 0) {
     context.waitUntil?.(incrementDailyCeiling(env, ceiling.storageKey, billedCalls));
+  }
+
+  // Every model attempt failed — generic error, never the upstream's body.
+  if (failed) {
+    return new Response('Extraction failed', { status: 502 });
   }
 
   return Response.json({ artists: result.artists, meta });

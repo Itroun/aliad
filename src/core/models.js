@@ -8,4 +8,3 @@
 // recall, ~12x cheaper than the fallback) took over as primary.
 export const PRIMARY = 'qwen/qwen3-30b-a3b-instruct-2507';
 export const FALLBACK = 'xiaomi/mimo-v2.5-pro';
-export const ALLOWED_MODELS = [PRIMARY, FALLBACK];

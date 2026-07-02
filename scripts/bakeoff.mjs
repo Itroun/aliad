@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { SYSTEM_PROMPT_TEXT, SYSTEM_PROMPT_HTML, ARTIST_SCHEMA } from '../src/core/extract.js';
+import { parseArtists } from '../src/core/extractCore.js';
 import { normaliseName } from '../src/core/merge.js';
 import { PRIMARY, FALLBACK } from '../src/core/models.js';
 
@@ -176,17 +177,6 @@ function readApiKey() {
   return null;
 }
 
-// Mirror of extract.js parseJSON: tolerate ```-fenced output.
-function parseJSON(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fenced) return JSON.parse(fenced[1].trim());
-    throw new Error('unparseable');
-  }
-}
-
 // precision/recall/F1 over normalised name sets.
 function score(predicted, expected) {
   const pred = new Set((predicted ?? []).map(normaliseName).filter(Boolean));
@@ -269,9 +259,11 @@ async function runModel(apiKey, model, runs) {
       latencies.push(out.durationMs);
       promptTokens += out.usage.prompt_tokens ?? 0;
       completionTokens += out.usage.completion_tokens ?? 0;
-      let parsed;
+      let artists;
       try {
-        parsed = parseJSON(out.raw);
+        // Same shared parser prod uses (server/api/openrouter.js → parseArtists),
+        // so the bake-off measures the exact parse behaviour that ships.
+        artists = parseArtists(out.raw);
         jsonOk++;
       } catch {
         notes.push(`  ⚠ ${c.label}: invalid JSON → ${out.raw.slice(0, 80).replace(/\n/g, ' ')}`);
@@ -280,7 +272,7 @@ async function runModel(apiKey, model, runs) {
         recalls.push(0);
         continue;
       }
-      const s = score(parsed.artists, c.expected);
+      const s = score(artists, c.expected);
       f1s.push(s.f1);
       precisions.push(s.precision);
       recalls.push(s.recall);
