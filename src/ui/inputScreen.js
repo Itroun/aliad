@@ -97,8 +97,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
 
       <div class="input-footer">
         <span class="footer-mark">aliad</span>
-        <!-- TODO(deploy): point href at the real aliad repo. -->
-        <a class="footer-link" href="https://github.com/example/aliad" target="_blank" rel="noopener noreferrer">github</a>
+        <a class="footer-link" href="https://github.com/Itroun/aliad" target="_blank" rel="noopener noreferrer">github</a>
       </div>
     </main>
   `;

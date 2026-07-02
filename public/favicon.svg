@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="aliad">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="78%">
+      <stop offset="0%" stop-color="#16314f" />
+      <stop offset="55%" stop-color="#0c1433" />
+      <stop offset="100%" stop-color="#070a17" />
+    </radialGradient>
+    <linearGradient id="star" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f4d98a" />
+      <stop offset="55%" stop-color="#dcc084" />
+      <stop offset="100%" stop-color="#c9a85e" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)" />
+  <path
+    d="M32 7 C 34 26, 38 30, 57 32 C 38 34, 34 38, 32 57 C 30 38, 26 34, 7 32 C 26 30, 30 26, 32 7 Z"
+    fill="url(#star)"
+  />
+</svg>

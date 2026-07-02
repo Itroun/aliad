@@ -1,6 +1,6 @@
 name = "aliad"
 main = "server/index.js"
-compatibility_date = "2025-01-01"
+compatibility_date = "2026-06-01"
 
 # Static assets: the built Vite app in dist/. Requests that don't match an asset
 # fall through to the Worker (server/index.js), which owns the /api/* routes.
