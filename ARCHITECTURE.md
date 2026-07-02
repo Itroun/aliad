@@ -20,7 +20,7 @@ Input ─▶ Extraction ─▶ Closure walk (server) ─▶ Graph view
 1. **Input** (`src/ui/inputScreen.js`). Paste text, a URL, or a flyer/PDF/image.
 2. **Extraction** (`src/core/extract.js`). Clean line-per-artist text passes
    through untouched; anything messier is sent to an LLM through the
-   `/api/openrouter` proxy, which returns a clean list + any alias hints. URLs are
+   `/api/openrouter` proxy, which returns a clean list of act names. URLs are
    fetched server-side via `/api/fetch-page` (SSRF-guarded), HTML pre-cleaned by
    `src/core/cleanHTML.js`.
 3. **Lookup + closure** (`src/core/lookup.js` → `/api/closure`). `lookupAll` is a
@@ -43,12 +43,12 @@ src/
 │   ├── quads.js         pure: mapped result ⇄ typed quads (decompose/reconstitute)
 │   ├── merge.js         normaliseName + bucket-wise, source-attributed dedupe
 │   ├── graph.js         merged closure → graph view-model (edges, bridges, owners)
-│   ├── extract.js       input-type detection + Claude-backed lineup extraction
-│   ├── cleanHTML.js     strip pages down before sending to Claude
+│   ├── extract.js       input-type detection + LLM lineup extraction (thin proxy client)
+│   ├── cleanHTML.js     strip pages down before sending to the LLM
 │   ├── fetchWithRetry.js  shared retry (honours Retry-After, capped 60s)
 │   ├── tokenBucket.js   pure bucket math for the Discogs rate gate
 │   ├── schemaVersion.js cache SCHEMA_VERSION (shared L2 invalidation key)
-│   └── models.js        allowed Claude model ids
+│   └── models.js        primary + fallback model ids (via OpenRouter)
 ├── providers/
 │   ├── musicbrainz.map.js  pure search→pick→map mappers (pickMatch / mapDetails)
 │   ├── discogs.map.js      "
