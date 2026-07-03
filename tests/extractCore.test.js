@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { parseArtists, looksUnderExtracted, runExtraction } from '../src/core/extractCore.js';
+import {
+  parseArtists,
+  stripCountrySuffix,
+  looksUnderExtracted,
+  runExtraction,
+} from '../src/core/extractCore.js';
 import { PRIMARY, FALLBACK } from '../src/core/models.js';
 
 describe('parseArtists', () => {
@@ -16,9 +21,47 @@ describe('parseArtists', () => {
     expect(parseArtists('{"artists":null}')).toEqual([]);
   });
 
+  it('strips leaked country tags from names', () => {
+    expect(parseArtists('{"artists":["Alien Rain_DE","Etnica net_IT","Shpongle"]}')).toEqual([
+      'Alien Rain',
+      'Etnica net',
+      'Shpongle',
+    ]);
+  });
+
   it('throws on unparseable / truncated output', () => {
     expect(() => parseArtists('{"artists":["A","B"')).toThrow(/parse/i);
     expect(() => parseArtists('not json at all')).toThrow(/parse/i);
+  });
+});
+
+describe('stripCountrySuffix', () => {
+  it('strips a trailing _CC country tag', () => {
+    expect(stripCountrySuffix('Alien Rain_DE')).toBe('Alien Rain');
+    expect(stripCountrySuffix('Alex Tolstey_PA')).toBe('Alex Tolstey');
+    expect(stripCountrySuffix('Quest 4 Goa_PT')).toBe('Quest 4 Goa');
+  });
+
+  it('leaves clean names untouched', () => {
+    expect(stripCountrySuffix('Shpongle')).toBe('Shpongle');
+    expect(stripCountrySuffix('KLIL.co')).toBe('KLIL.co');
+    expect(stripCountrySuffix('E~SKO')).toBe('E~SKO');
+  });
+
+  it('keeps short bases that merely look like the pattern', () => {
+    expect(stripCountrySuffix('AC_DC')).toBe('AC_DC');
+  });
+
+  it('does not strip lowercase or non-2-letter tails', () => {
+    expect(stripCountrySuffix('Some Artist_de')).toBe('Some Artist_de');
+    expect(stripCountrySuffix('Some Artist_DEU')).toBe('Some Artist_DEU');
+    expect(stripCountrySuffix('Some Artist_D')).toBe('Some Artist_D');
+  });
+
+  it('tolerates junk input', () => {
+    expect(stripCountrySuffix('')).toBe('');
+    expect(stripCountrySuffix(null)).toBe('');
+    expect(stripCountrySuffix(undefined)).toBe('');
   });
 });
 

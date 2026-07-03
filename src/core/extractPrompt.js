@@ -11,9 +11,11 @@ Return a JSON object with:
 - "artists": array of artist/performer name strings
 
 Rules:
-- Include only artist/performer/DJ/band names — not venues, labels, cities, or event names
+- Include only artist/performer/DJ/band names — not venues, cities, or event names
+- Exclude record labels and label showcases, even when billed like acts (e.g. "Something Rec", "Something Records")
 - For collaborative acts like "X vs Y", "X & Y", "X b2b Y", return the combined name as-is
 - Strip set type annotations: "(DJ Set)", "(Live)", "(Producer Set)", etc.
+- Strip country/label tags glued onto a name: "Some Artist_DE" → "Some Artist"
 - If a name appears in different forms, pick the most complete version
 - Return valid JSON only, no markdown fencing`;
 
@@ -23,9 +25,11 @@ Return a JSON object with:
 - "artists": array of artist/performer name strings
 
 Rules:
-- Include only artist/performer/DJ/band names — not venues, labels, cities, or event names
+- Include only artist/performer/DJ/band names — not venues, cities, or event names
+- Exclude record labels and label showcases, even when billed like acts (e.g. "Something Rec", "Something Records")
 - For collaborative acts like "X vs Y", "X & Y", "X b2b Y", return the combined name as-is
 - Strip set type annotations: "(DJ Set)", "(Live)", "(Producer Set)", etc.
+- Strip country/label tags glued onto a name: "Some Artist_DE" → "Some Artist"
 - If a name appears in different forms, pick the most complete version
 - Return valid JSON only, no markdown fencing`;
 

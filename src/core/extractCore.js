@@ -11,13 +11,29 @@
 
 import { PRIMARY, FALLBACK } from './models.js';
 
+// Festival pages bill acts with a country tag glued on ("Alien Rain_DE",
+// "Alex Tolstey_PA"). The prompt asks the model to strip these, and it usually
+// does — but not reliably (a measured cold run got the literal form from the
+// same model + prompt + input that scored clean in the bake-off), and one
+// leaked tag pollutes the normalised lookup key, turning a dump hit into wire
+// calls. So strip deterministically here too. Base must keep ≥3 chars so names
+// that legitimately look like the pattern ("AC_DC") survive.
+export function stripCountrySuffix(name) {
+  return String(name ?? '')
+    .replace(/^(.{3,}?)_[A-Z]{2}$/, '$1')
+    .trim();
+}
+
 // Parse a model's raw completion text into a flat artist array. Throws when the
 // text isn't JSON (a truncated max_tokens cutoff, or prose) so the caller treats
 // it as a failed model attempt and can escalate. A parsed object without an
 // `artists` array yields [] — an under-extraction, not a hard failure.
+// Names get the deterministic country-tag cleanup on the way out, so every
+// consumer (the endpoint's both model tiers, the bake-off) sees clean names.
 export function parseArtists(text) {
   const data = parseJSON(text);
-  return Array.isArray(data?.artists) ? data.artists : [];
+  if (!Array.isArray(data?.artists)) return [];
+  return data.artists.map(stripCountrySuffix).filter(Boolean);
 }
 
 function parseJSON(text) {
