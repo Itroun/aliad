@@ -173,7 +173,14 @@ describe('runClosure (SSE endpoint core)', () => {
     expect(mb.serverCache).toBe('MISS');
     expect(mb.ok).toBe(true);
     // Cold lookup → the event carries the upstream telemetry (search + details).
-    expect(mb.stats).toEqual({ calls: 2, retries: 0, status429: 0, gateWaitMs: 0, dumpHit: false });
+    expect(mb.stats).toEqual({
+      calls: 2,
+      retries: 0,
+      status429: 0,
+      gateWaitMs: 0,
+      dumpHit: 0,
+      dumpError: 0,
+    });
     // The fetched result was decomposed into the substrate.
     expect(store.lookups.has('musicbrainz:solo artist')).toBe(true);
     const [done] = cap.of('done');

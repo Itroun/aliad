@@ -70,6 +70,21 @@ describe('makeDumpStore', () => {
     expect(await store.getArtist('who dis')).toBeNull();
   });
 
+  it('returns null for an absent name even if the edges result is missing (presence checked first)', async () => {
+    // Truncated response: presence (empty) + close, no edges result.
+    const fetchFn = fetchReturning({
+      results: [okExecute([]), { type: 'ok', response: { type: 'close' } }],
+    });
+    const store = makeDumpStore(ENV, { fetchFn });
+    expect(await store.getArtist('who dis')).toBeNull();
+  });
+
+  it('throws on a present row with a null/non-integer artist_id (bad response, not id:0)', async () => {
+    const fetchFn = fetchReturning(pipeline([[{ type: 'null' }]], []));
+    const store = makeDumpStore(ENV, { fetchFn });
+    await expect(store.getArtist('weird')).rejects.toThrow(/bad artist_id/);
+  });
+
   it('returns null for an empty name without hitting the network', async () => {
     const fetchFn = fetchReturning(pipeline([], []));
     const store = makeDumpStore(ENV, { fetchFn });

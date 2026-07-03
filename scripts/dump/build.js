@@ -28,11 +28,12 @@ import { parseArtist } from './parseArtist.js';
 import { resolveWinner } from './resolveWinner.js';
 import { normaliseName } from '../../src/core/merge.js';
 import { stripDisambiguation } from '../../src/providers/discogs.map.js';
+import { KIND_CODE } from '../../src/core/dumpKinds.js';
 
 const SUFFIX_RE = / \(\d+\)$/; // the "(3)"-style disambiguation the norm key strips
-const KIND = { aliases: 'a', groups: 'g', members: 'm' };
 const COMMIT_EVERY = 50_000;
 const RESOLVE_PAGE = 50_000;
+const LOG_EVERY = 500_000;
 
 const SCHEMA = `
 CREATE TABLE dump_names (
@@ -110,6 +111,7 @@ async function ingest(db, input, log) {
   let artists = 0;
   let edges = 0;
   let pending = 0;
+  let nextLog = LOG_EVERY;
   db.exec('BEGIN');
 
   const handleRecord = (record) => {
@@ -125,7 +127,7 @@ async function ingest(db, input, log) {
     ];
     let edgeCount = 0;
     for (const [section, list] of relSets) {
-      const kind = KIND[section];
+      const kind = KIND_CODE[section];
       for (const rel of list) {
         insEdge.run(a.id, kind, rel.id, rel.name);
         edgeCount += 1;
@@ -141,7 +143,13 @@ async function ingest(db, input, log) {
       db.exec('COMMIT');
       db.exec('BEGIN');
       pending = 0;
-      if (artists % 500_000 < 1) log(`  …${artists.toLocaleString()} artists`);
+    }
+    // Progress on a running threshold, not `artists % N` at commit time — commits
+    // fire on `pending`, so the artist count almost never lands on an exact
+    // multiple and the log would (silently) never print.
+    if (artists >= nextLog) {
+      log(`  …${artists.toLocaleString()} artists`);
+      nextLog += LOG_EVERY;
     }
   };
 

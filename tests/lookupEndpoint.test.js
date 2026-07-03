@@ -233,7 +233,8 @@ describe('handleLookup', () => {
       retries: 0,
       status429: 0,
       gateWaitMs: 0,
-      dumpHit: false,
+      dumpHit: 0,
+      dumpError: 0,
     });
 
     const second = await handleLookup({}, args);
@@ -272,7 +273,8 @@ describe('handleLookup', () => {
       retries: 1,
       status429: 1,
       gateWaitMs: 0,
-      dumpHit: false,
+      dumpHit: 0,
+      dumpError: 0,
     });
   });
 
@@ -446,7 +448,7 @@ describe('handleLookup', () => {
     });
     expect(res.cache).toBe('MISS');
     expect(parse(res).aliases.map((a) => a.name)).toEqual(['TA']);
-    expect(res.stats.dumpHit).toBe(true);
+    expect(res.stats.dumpHit).toBe(1);
     expect(res.stats.calls).toBe(0);
     expect(res.stats.gateWaitMs).toBe(0);
     expect(ns.urls.length).toBe(0); // no token taken
@@ -497,7 +499,7 @@ describe('handleLookup', () => {
       store,
     });
     expect(res.cache).toBe('MISS');
-    expect(res.stats.dumpHit).toBe(true);
+    expect(res.stats.dumpHit).toBe(1);
     expect(parse(res)).toEqual({ aliases: [], groups: [], members: [], relatedProjects: [] });
     // Empty → the 7-day TTL, not the 30-day one.
     const [row] = [...store.lookups.values()];
@@ -523,7 +525,7 @@ describe('handleLookup', () => {
       store,
     });
     expect(res.cache).toBe('MISS');
-    expect(res.stats.dumpHit).toBe(false);
+    expect(res.stats.dumpHit).toBe(0);
     expect(res.stats.calls).toBe(2); // search + details went to the wire
     expect(parse(res).aliases.map((a) => a.name)).toEqual(['TA']);
     expect(ns.urls.length).toBe(2); // both wire attempts gated
@@ -550,9 +552,97 @@ describe('handleLookup', () => {
       store,
     });
     expect(res.cache).toBe('MISS');
-    expect(res.stats.dumpHit).toBe(false);
+    expect(res.stats.dumpHit).toBe(0);
+    expect(res.stats.dumpError).toBe(1); // the broken dump left a trace
     expect(res.stats.calls).toBe(2);
     expect(parse(res).aliases.map((a) => a.name)).toEqual(['TA']);
+  });
+
+  it('serves a dump hit with NO Discogs token (token only required for the wire)', async () => {
+    const store = fakeStore();
+    const env = {}; // no DISCOGS_TOKEN
+    const dumpStore = dumpHitOf({
+      id: 9,
+      aliases: [{ id: 8, name: 'TA' }],
+      groups: [],
+      members: [],
+    });
+    const res = await handleLookup(env, {
+      provider: 'discogs',
+      name: 'Test Artist',
+      fetchFn: noWire(),
+      dumpStore,
+      now: () => 1,
+      store,
+    });
+    expect(res.status).toBe(200);
+    expect(res.cache).toBe('MISS');
+    expect(res.stats.dumpHit).toBe(1);
+    expect(parse(res).aliases.map((a) => a.name)).toEqual(['TA']);
+  });
+
+  it('still 500s a Discogs wire fallback (dump miss) when no token is configured', async () => {
+    const store = fakeStore();
+    const dumpStore = dumpHitOf(null); // name absent → needs the wire
+    const res = await handleLookup(
+      {}, // no DISCOGS_TOKEN
+      {
+        provider: 'discogs',
+        name: 'Test Artist',
+        fetchFn: noWire(),
+        dumpStore,
+        now: () => 1,
+        store,
+      },
+    );
+    expect(res.status).toBe(500);
+  });
+
+  it('propagates an AbortError from the dump instead of masking it as a miss', async () => {
+    const store = fakeStore();
+    const env = { DISCOGS_TOKEN: 'tok' };
+    const dumpStore = {
+      getArtist: async () => {
+        const err = new Error('aborted');
+        err.name = 'AbortError';
+        throw err;
+      },
+    };
+    // The abort surfaces as a 502 (no prior entry to serve STALE) and never
+    // reaches the wire — not a silent dump-miss that proceeds to fetch.
+    let wire = 0;
+    const res = await handleLookup(env, {
+      provider: 'discogs',
+      name: 'Test Artist',
+      fetchFn: async () => {
+        wire++;
+        throw new Error('should not reach the wire');
+      },
+      dumpStore,
+      sleep: () => {},
+      now: () => 1,
+      store,
+    });
+    expect(res.status).toBe(502);
+    expect(wire).toBe(0);
+  });
+
+  it('queries the dump with the disambiguation-stripped key (matches the build)', async () => {
+    const store = fakeStore();
+    let queried;
+    const dumpStore = {
+      getArtist: async (key) => {
+        queried = key;
+        return { id: 9, aliases: [], groups: [], members: [] };
+      },
+    };
+    await handleLookup(
+      { DISCOGS_TOKEN: 'tok' },
+      { provider: 'discogs', name: 'Air (2)', fetchFn: noWire(), dumpStore, now: () => 1, store },
+    );
+    // build.js keys dump_names on normaliseName(stripDisambiguation(raw)); the
+    // query must strip the "(2)" too or the name would miss the dump.
+    expect(queried).toBe('air');
   });
 
   it('never consults the dump for MusicBrainz (no dump: true on that provider)', async () => {
@@ -574,7 +664,7 @@ describe('handleLookup', () => {
       },
     );
     expect(res.cache).toBe('MISS');
-    expect(res.stats.dumpHit).toBe(false);
+    expect(res.stats.dumpHit).toBe(0);
     expect(parse(res).aliases.map((a) => a.name)).toEqual(['TA']);
   });
 });

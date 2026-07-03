@@ -126,14 +126,31 @@ async function lookupUpstream(
   if (cfg.dump && dumpStore) {
     let details;
     try {
-      details = await dumpStore.getArtist(normaliseName(name), { signal });
-    } catch {
-      details = undefined; // dump unreachable → fall through to the wire
+      // Key exactly as the dump was built: normaliseName(stripDisambiguation()).
+      // Skipping the strip here would miss any "(N)"-suffixed name (build side is
+      // scripts/dump/build.js stageName).
+      details = await dumpStore.getArtist(normaliseName(discogs.stripDisambiguation(name)), {
+        signal,
+      });
+    } catch (err) {
+      if (err?.name === 'AbortError') throw err; // client disconnect must stop the walk
+      // Dump unreachable/broken → fall through to the wire, but leave a trace so a
+      // persistent Turso failure doesn't masquerade as a normal cold run.
+      stats.dumpError = 1;
+      details = undefined;
     }
     if (details) {
-      stats.dumpHit = true;
+      stats.dumpHit = 1;
       return cfg.mapDetails(details);
     }
+  }
+
+  // Past here we need the wire, which needs the Discogs token — checked lazily so
+  // a dump hit above serves token-free (degrade-open).
+  if (cfg.requiresToken && !env?.DISCOGS_TOKEN) {
+    const err = new Error('Discogs token not configured');
+    err.code = 'NO_TOKEN';
+    throw err;
   }
 
   const headers = cfg.headers(env);
@@ -189,9 +206,9 @@ export async function handleLookup(
 ) {
   const cfg = PROVIDERS[provider];
   if (!cfg) return { status: 400, body: 'Unknown provider', cache: null };
-  if (cfg.requiresToken && !env?.DISCOGS_TOKEN) {
-    return { status: 500, body: 'Discogs token not configured', cache: null };
-  }
+  // The Discogs token is required only for the WIRE path — a dump hit serves
+  // token-free. lookupUpstream throws NO_TOKEN if it actually needs the wire and
+  // the token is missing; both call sites below map that to the 500.
 
   const ok = (result, cache, stats) => ({
     status: 200,
@@ -202,7 +219,7 @@ export async function handleLookup(
   const nameKey = normaliseName(name);
   if (!nameKey) return ok(emptyResult(), 'BYPASS');
 
-  const stats = { calls: 0, retries: 0, status429: 0, gateWaitMs: 0, dumpHit: false };
+  const stats = { calls: 0, retries: 0, status429: 0, gateWaitMs: 0, dumpHit: 0, dumpError: 0 };
 
   // Both stores are injectable for tests; default to the real adapters when
   // their bindings are present (each returns null / is null when unbound, so the
@@ -212,18 +229,25 @@ export async function handleLookup(
 
   // Degraded: no D1 bound → straight upstream, no caching (same posture as kvLimit).
   if (!graph) {
-    return ok(
-      await lookupUpstream(cfg, env, name, {
-        fetchFn,
-        sleep,
-        signal,
+    try {
+      return ok(
+        await lookupUpstream(cfg, env, name, {
+          fetchFn,
+          sleep,
+          signal,
+          stats,
+          priority,
+          dumpStore: dump,
+        }),
+        'BYPASS',
         stats,
-        priority,
-        dumpStore: dump,
-      }),
-      'BYPASS',
-      stats,
-    );
+      );
+    } catch (err) {
+      if (err?.code === 'NO_TOKEN') {
+        return { status: 500, body: 'Discogs token not configured', cache: null };
+      }
+      throw err;
+    }
   }
 
   const sourceKey = sourceKeyFor(provider, nameKey);
@@ -256,6 +280,11 @@ export async function handleLookup(
       dumpStore: dump,
     });
   } catch (err) {
+    // No Discogs token and the dump couldn't serve → the same hard 500 as before,
+    // but only now that the wire is genuinely needed.
+    if (err?.code === 'NO_TOKEN') {
+      return { status: 500, body: 'Discogs token not configured', cache: null, stats };
+    }
     // Stale-on-error: serve a prior (expired) entry's quads rather than failing.
     if (lookupRow) {
       try {

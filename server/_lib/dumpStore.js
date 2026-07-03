@@ -15,14 +15,14 @@
 // relation-less roots never touch the API. Any transport / SQL error throws so
 // the caller falls through to the wire.
 
+import { BUCKET_FOR_CODE } from '../../src/core/dumpKinds.js';
+
 const PRESENCE_SQL = 'SELECT artist_id FROM dump_names WHERE norm_name = ?';
 // Resolve the id inline so both statements key only on norm_name and batch into
 // one pipeline round-trip.
 const EDGES_SQL =
   'SELECT kind, other_id, other_name FROM dump_edges ' +
   'WHERE artist_id = (SELECT artist_id FROM dump_names WHERE norm_name = ?)';
-
-const KIND_BUCKET = { a: 'aliases', g: 'groups', m: 'members' };
 
 export function makeDumpStore(env, { fetchFn = fetch } = {}) {
   const base = env?.TURSO_DUMP_URL;
@@ -53,16 +53,20 @@ export function makeDumpStore(env, { fetchFn = fetch } = {}) {
       if (!res.ok) throw new Error(`dump store HTTP ${res.status}`);
 
       const body = await res.json();
-      const presence = executeResult(body, 0);
-      const edges = executeResult(body, 1);
-
-      const presenceRows = presence.rows ?? [];
-      if (presenceRows.length === 0) return null; // name not in the dump
+      const presenceRows = executeResult(body, 0).rows ?? [];
+      if (presenceRows.length === 0) return null; // name not in the dump — read edges only when present
 
       const id = Number(cell(presenceRows[0], 0));
+      // A present name must carry a positive integer id; anything else means a
+      // malformed response — throw so the caller degrades to the wire rather than
+      // returning a bogus id:0 hit (which mapDetails would then strip of its URL).
+      if (!Number.isInteger(id) || id <= 0) {
+        throw new Error(`dump store: bad artist_id for "${key}"`);
+      }
+
       const details = { id, aliases: [], groups: [], members: [] };
-      for (const row of edges.rows ?? []) {
-        const bucket = KIND_BUCKET[cell(row, 0)];
+      for (const row of executeResult(body, 1).rows ?? []) {
+        const bucket = BUCKET_FOR_CODE[cell(row, 0)];
         if (!bucket) continue;
         details[bucket].push({ id: Number(cell(row, 1)), name: String(cell(row, 2) ?? '') });
       }

@@ -13,9 +13,9 @@ const NOOP_PROBE = {
 export function formatStatsParts(stats) {
   const parts = [`${stats.calls ?? 0} calls`];
   // A dump hit serves from the local Discogs snapshot — zero calls, zero gate.
-  // Per-lookup `dumpHit` is a boolean; the roll-up sums it to a count.
-  const dumpHits = stats.dumpHit === true ? 1 : (stats.dumpHit ?? 0);
-  if (dumpHits) parts.push(`${dumpHits} dump`);
+  // `dumpHit`/`dumpError` are 0/1 per lookup and summed to counts in the roll-up.
+  if (stats.dumpHit) parts.push(`${stats.dumpHit} dump`);
+  if (stats.dumpError) parts.push(`${stats.dumpError} dumpErr`);
   if (stats.status429) parts.push(`429×${stats.status429}`);
   if (stats.retries) parts.push(`${stats.retries} retries`);
   // Sub-100ms gate waits are noise, not backpressure.
@@ -206,6 +206,7 @@ export function createDevProbe() {
           status429: 0,
           gateWaitMs: 0,
           dumpHit: 0,
+          dumpError: 0,
         },
       };
       providerStats.set(provider, entry);
@@ -220,7 +221,8 @@ export function createDevProbe() {
       t.retries += stats.retries ?? 0;
       t.status429 += stats.status429 ?? 0;
       t.gateWaitMs += stats.gateWaitMs ?? 0;
-      t.dumpHit += stats.dumpHit ? 1 : 0;
+      t.dumpHit += stats.dumpHit ?? 0;
+      t.dumpError += stats.dumpError ?? 0;
     }
 
     const cacheBits = formatCacheBits(t);
