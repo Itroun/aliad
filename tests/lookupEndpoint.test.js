@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { handleLookup } from '../server/api/lookup.js';
 import { SCHEMA_VERSION } from '../src/core/schemaVersion.js';
+import { fakeRateLimiterNs } from './helpers/fakeRateLimiter.js';
 
 // In-memory stand-in for the D1 quad store (server/_lib/quadStore.js),
 // mirroring how earlier tests used a fakeKV. getLookup returns rows in the
@@ -266,17 +267,9 @@ describe('handleLookup', () => {
   it('accumulates Discogs gate wait time in the stats', async () => {
     const store = fakeStore();
     // Rate-limiter DO fake: first take denied (wait 40ms), then granted.
-    let takes = 0;
     const env = {
       DISCOGS_TOKEN: 'tok',
-      RATE_LIMITER: {
-        idFromName: (name) => name,
-        get: () => ({
-          fetch: async () => ({
-            json: async () => (++takes === 1 ? { granted: false, waitMs: 40 } : { granted: true }),
-          }),
-        }),
-      },
+      RATE_LIMITER: fakeRateLimiterNs([{ granted: false, waitMs: 40 }, { granted: true }]),
     };
     const fetchFn = fakeFetch([
       ['/database/search', { results: [{ id: 7, title: 'Test Artist' }] }],
@@ -297,19 +290,8 @@ describe('handleLookup', () => {
 
   it('gates every wire attempt, retries included', async () => {
     const store = fakeStore();
-    let takes = 0;
-    const env = {
-      DISCOGS_TOKEN: 'tok',
-      RATE_LIMITER: {
-        idFromName: (name) => name,
-        get: () => ({
-          fetch: async () => {
-            takes++;
-            return { json: async () => ({ granted: true }) };
-          },
-        }),
-      },
-    };
+    const ns = fakeRateLimiterNs([{ granted: true }]);
+    const env = { DISCOGS_TOKEN: 'tok', RATE_LIMITER: ns };
     // Search 429s once, then succeeds; details succeeds: 3 wire attempts.
     let searchTries = 0;
     const fetchFn = async (url) => {
@@ -342,24 +324,13 @@ describe('handleLookup', () => {
     expect(res.stats).toMatchObject({ calls: 3, retries: 1, status429: 1 });
     // The retry attempt consumed a token too — wire rate can never exceed the
     // bucket rate.
-    expect(takes).toBe(3);
+    expect(ns.urls.length).toBe(3);
   });
 
   it('forwards the priority tier to the rate gate', async () => {
     const store = fakeStore();
-    const gateUrls = [];
-    const env = {
-      DISCOGS_TOKEN: 'tok',
-      RATE_LIMITER: {
-        idFromName: (name) => name,
-        get: () => ({
-          fetch: async (url) => {
-            gateUrls.push(url);
-            return { json: async () => ({ granted: true }) };
-          },
-        }),
-      },
-    };
+    const ns = fakeRateLimiterNs([{ granted: true }]);
+    const env = { DISCOGS_TOKEN: 'tok', RATE_LIMITER: ns };
     const fetchFn = fakeFetch([['/database/search', { results: [] }]]);
     await handleLookup(env, {
       provider: 'discogs',
@@ -369,7 +340,34 @@ describe('handleLookup', () => {
       store,
       priority: 'expand',
     });
-    expect(gateUrls[0]).toContain('priority=expand');
+    expect(ns.urls[0]).toContain('priority=expand');
+  });
+
+  it('aborts a parked gate wait without consuming a token (502, no wire call)', async () => {
+    const store = fakeStore();
+    // Deny forever: the lookup parks at the gate; the abort must end it.
+    const ns = fakeRateLimiterNs([{ granted: false, waitMs: 40 }]);
+    const env = { DISCOGS_TOKEN: 'tok', RATE_LIMITER: ns };
+    const signal = { aborted: false };
+    let wireCalls = 0;
+    const fetchFn = async () => {
+      wireCalls++;
+      throw new Error('should not reach the wire');
+    };
+    const res = await handleLookup(env, {
+      provider: 'discogs',
+      name: 'Test Artist',
+      fetchFn,
+      sleep: () => {
+        signal.aborted = true; // client disconnects while parked
+      },
+      signal,
+      now: () => 1,
+      store,
+    });
+    expect(res.status).toBe(502);
+    expect(wireCalls).toBe(0);
+    expect(ns.urls.length).toBe(1); // one denied take, no post-abort takes
   });
 
   it('carries the failed attempts in stats on a 502', async () => {

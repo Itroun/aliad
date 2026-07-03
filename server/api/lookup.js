@@ -15,7 +15,7 @@
 // for rate limiting + the OpenRouter ceiling. See ARCHITECTURE.md.
 
 import { checkRateLimit } from '../_lib/kvLimit.js';
-import { awaitDiscogsSlot } from '../_lib/rateGate.js';
+import { awaitDiscogsSlot, PRIORITY_ROOT } from '../_lib/rateGate.js';
 import { makeD1Store } from '../_lib/quadStore.js';
 import { SCHEMA_VERSION } from '../../src/core/schemaVersion.js';
 import { normaliseName } from '../../src/core/merge.js';
@@ -93,8 +93,12 @@ function recordAttempts(stats, attempts) {
   for (const a of attempts) if (a.status === 429) stats.status429++;
 }
 
-async function getJson(url, headers, fetchFn, retry, sleep, stats) {
-  const result = await fetchWithRetry(url, { headers }, { fetchFn, sleep, ...(retry ?? {}) });
+async function getJson(url, { headers, fetchFn, retry, sleep, signal, stats }) {
+  const result = await fetchWithRetry(
+    url,
+    { headers },
+    { fetchFn, sleep, signal, ...(retry ?? {}) },
+  );
   recordAttempts(stats, result.attempts);
   if (!result.ok) throw new Error(`upstream ${result.status ?? result.reason} for ${url}`);
   return result.response.json();
@@ -104,7 +108,7 @@ async function getJson(url, headers, fetchFn, retry, sleep, stats) {
 // the same selection/mapping as the browser used to, now server-side.
 // Mutates `stats` (calls/retries/429s/gate wait) as it goes so the collector is
 // meaningful even when the pipeline throws mid-way (the STALE/502 paths).
-async function lookupUpstream(cfg, env, name, fetchFn, sleep, stats, priority) {
+async function lookupUpstream(cfg, env, name, { fetchFn, sleep, signal, stats, priority }) {
   const headers = cfg.headers(env);
   // Gate at the WIRE level, not per logical call: every attempt fetchWithRetry
   // fires — retries included — takes one token, so the outbound rate can never
@@ -112,31 +116,20 @@ async function lookupUpstream(cfg, env, name, fetchFn, sleep, stats, priority) {
   // spirals: once the upstream 429s, each granted lookup fires extra ungated
   // retries, holding the provider above its window exactly when the rate needs
   // to drop (measured: a cold lineup's Discogs side collapsed this way).
+  // The signal reaches the gate too, so an abandoned request stops waiting —
+  // and never takes a token — the moment the client goes away.
   const wireFetch = !cfg.gated
     ? fetchFn
     : async (url, init) => {
-        stats.gateWaitMs += await awaitDiscogsSlot(env, { sleep, priority });
+        stats.gateWaitMs += await awaitDiscogsSlot(env, { sleep, signal, priority });
         return fetchFn(url, init);
       };
-  const searchData = await getJson(
-    cfg.searchUrl(name),
-    headers,
-    wireFetch,
-    cfg.retry,
-    sleep,
-    stats,
-  );
+  const fetchJson = (url) =>
+    getJson(url, { headers, fetchFn: wireFetch, retry: cfg.retry, sleep, signal, stats });
+  const searchData = await fetchJson(cfg.searchUrl(name));
   const match = cfg.pickMatch(searchData, name);
   if (!match) return emptyResult();
-  const details = await getJson(
-    cfg.detailsUrl(match.id),
-    headers,
-    wireFetch,
-    cfg.retry,
-    sleep,
-    stats,
-  );
-  return cfg.mapDetails(details);
+  return cfg.mapDetails(await fetchJson(cfg.detailsUrl(match.id)));
 }
 
 /**
@@ -149,10 +142,22 @@ async function lookupUpstream(cfg, env, name, fetchFn, sleep, stats, priority) {
  * `priority` ('root' | 'expand', default 'root') is the rate-gate tier: the
  * closure walk marks its expansion lookups 'expand' so cold roots across all
  * concurrent streams get Discogs tokens first.
+ *
+ * `signal` aborts the upstream leg — including a gate wait in progress, so an
+ * abandoned request never consumes a Discogs token.
  */
 export async function handleLookup(
   env,
-  { provider, name, fetchFn = fetch, sleep, now = Date.now, store, priority = 'root' },
+  {
+    provider,
+    name,
+    fetchFn = fetch,
+    sleep,
+    now = Date.now,
+    store,
+    priority = PRIORITY_ROOT,
+    signal,
+  },
 ) {
   const cfg = PROVIDERS[provider];
   if (!cfg) return { status: 400, body: 'Unknown provider', cache: null };
@@ -177,7 +182,7 @@ export async function handleLookup(
   // Degraded: no D1 bound → straight upstream, no caching (same posture as kvLimit).
   if (!graph) {
     return ok(
-      await lookupUpstream(cfg, env, name, fetchFn, sleep, stats, priority),
+      await lookupUpstream(cfg, env, name, { fetchFn, sleep, signal, stats, priority }),
       'BYPASS',
       stats,
     );
@@ -204,7 +209,7 @@ export async function handleLookup(
 
   let result;
   try {
-    result = await lookupUpstream(cfg, env, name, fetchFn, sleep, stats, priority);
+    result = await lookupUpstream(cfg, env, name, { fetchFn, sleep, signal, stats, priority });
   } catch (err) {
     // Stale-on-error: serve a prior (expired) entry's quads rather than failing.
     if (lookupRow) {
@@ -256,7 +261,11 @@ export async function handle(context) {
   const rate = await checkRateLimit(env, { ...cfg.rateLimit, ip });
   if (!rate.allowed) return new Response('Too many requests', { status: 429 });
 
-  const { status, body, cache } = await handleLookup(env, { provider, name });
+  const { status, body, cache } = await handleLookup(env, {
+    provider,
+    name,
+    signal: request.signal,
+  });
   const headers = {};
   if (status === 200) headers['Content-Type'] = 'application/json';
   if (cache) headers['X-Cache'] = cache;

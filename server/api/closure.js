@@ -17,6 +17,7 @@
 
 import { checkRateLimit } from '../_lib/kvLimit.js';
 import { makeD1Store } from '../_lib/quadStore.js';
+import { PRIORITY_ROOT, PRIORITY_EXPAND } from '../_lib/rateGate.js';
 import { handleLookup } from './lookup.js';
 import { quadsToResult } from '../../src/core/quads.js';
 import { mergeResults, normaliseName } from '../../src/core/merge.js';
@@ -37,7 +38,7 @@ const PROVIDER_NAMES = ['musicbrainz', 'discogs'];
  */
 export async function runClosure(
   env,
-  { root, roots = [], fetchFn = fetch, sleep, now = Date.now, store, emit },
+  { root, roots = [], fetchFn = fetch, sleep, now = Date.now, store, emit, signal },
 ) {
   const graph = store ?? (env?.DB ? makeD1Store(env.DB) : null);
   if (!graph) {
@@ -51,6 +52,14 @@ export async function runClosure(
   const rootOutcomes = {};
 
   const neighbors = async (name) => {
+    // Client gone → stop the walk at the next node boundary. Without this the
+    // walk keeps going after a disconnect (per-lookup errors are swallowed
+    // below), burning Discogs tokens for a stream nobody is reading.
+    if (signal?.aborted) {
+      const err = new Error('Aborted');
+      err.name = 'AbortError';
+      throw err;
+    }
     const key = normaliseName(name);
     const isRoot = key === rootKey;
     // Drive each provider's cold/expired fetch + quad write, collecting its
@@ -68,10 +77,11 @@ export async function runClosure(
           fetchFn,
           sleep,
           now,
+          signal,
           // Rate-gate tier: cold ROOT lookups across all concurrent streams
           // take Discogs tokens ahead of expansion, so every act's headline
           // data lands before any act's deep walk (see server/rateLimiter.js).
-          priority: isRoot ? 'root' : 'expand',
+          priority: isRoot ? PRIORITY_ROOT : PRIORITY_EXPAND,
         });
         ok = res.status === 200;
         cache = res.cache;
@@ -144,18 +154,38 @@ export async function handle(context) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const emit = (event, data) => {
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+      // Enqueueing to a cancelled stream throws; swallow it — the walk's own
+      // stop signal is request.signal (checked per node in runClosure), not an
+      // exception ricocheting out of a progress event.
+      const send = (text) => {
+        try {
+          controller.enqueue(encoder.encode(text));
+        } catch {
+          /* client gone — the signal check ends the walk */
+        }
       };
-      // Propagate the client disconnect into upstream fetches so a closed tab
-      // stops the walk mid-flight.
+      const emit = (event, data) => {
+        send(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+      // A gate-parked lookup can legitimately hold the walk silent for minutes;
+      // keep bytes flowing so idle-connection timeouts between us and the
+      // browser don't cut the stream mid-run. SSE comment lines are ignored by
+      // the client parser.
+      const heartbeat = setInterval(() => send(': hb\n\n'), 15_000);
+      // Propagate the client disconnect into upstream fetches (and, via
+      // runClosure, into gate waits) so a closed tab stops the walk mid-flight.
       const tracedFetch = (u, opts) => fetch(u, { ...opts, signal: request.signal });
       try {
-        await runClosure(env, { root, roots, fetchFn: tracedFetch, emit });
+        await runClosure(env, { root, roots, fetchFn: tracedFetch, emit, signal: request.signal });
       } catch (err) {
         emit('error', { message: String(err?.message ?? err) });
       } finally {
-        controller.close();
+        clearInterval(heartbeat);
+        try {
+          controller.close();
+        } catch {
+          /* already closed by cancellation */
+        }
       }
     },
   });

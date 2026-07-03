@@ -173,10 +173,19 @@ Both lookups go through `/api/lookup`, which injects credentials server-side
   tokens freely, while *expansion* lookups (`priority=expand`) only succeed above
   a reserve floor — so on a cold lineup every act's headline data lands before any
   act's deep walk, and the long tail of a big cold run is background enrichment
-  rather than blocking. An expand waiter that outlives its wait budget is promoted
-  to the root tier (still gated), never let through ungated. A measured fully-cold
-  large lineup is Discogs-budget-bound wall-to-wall (calls ÷ refill ≈ total time),
-  which is why scheduling, not throughput, is the lever.
+  rather than blocking. Denied waiters sleep with per-denial escalation (capped
+  5 s root / 15 s expand) so parked waiters cost a few DO round-trips, not one
+  per second. Wait budgets are sized past the measured cold-run phases (600 s
+  root, 900 s expand — a fully-cold large lineup is Discogs-budget-bound
+  wall-to-wall, ~12+ min, which is why scheduling, not throughput, is the
+  lever): an expand waiter that outlives its budget is promoted to the root
+  tier (still gated), and only a waiter that then also exhausts the root budget
+  — meaning ~10+ minutes of continuous denial, i.e. a wedged DO, not a busy run
+  — proceeds ungated as the last resort. Gate waits are **abort-aware**: the
+  request's signal reaches the gate, so a disconnected client's walk stops at
+  the next node and never consumes a token for a fetch nobody will read. The
+  closure SSE stream sends a comment heartbeat every 15 s so a long gate park
+  can't get the stream killed by idle-connection timeouts.
 - **Transient errors.** 429 / 5xx retry with backoff + jitter; anything else
   surfaces as a provider failure — the node usually still has data from the other
   provider, and a warm re-run clears it.

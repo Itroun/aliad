@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RateLimiter } from '../server/rateLimiter.js';
 
 // Drive the Durable Object class directly through its fetch interface — the
@@ -11,6 +11,12 @@ const takeOnce = async (limiter, priority) => {
 };
 
 describe('RateLimiter DO priority tiers', () => {
+  // The DO reads Date.now() internally (no injection seam), and the assertions
+  // below depend on NO refill happening between takes — freeze the clock so a
+  // stalled CI runner can't refill the bucket past the floor mid-test.
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it('expand takes stop at the reserve floor; root takes drain past it', async () => {
     const limiter = new RateLimiter(null, null);
 

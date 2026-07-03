@@ -13,6 +13,7 @@
 // this file + server/_lib/rateGate.js for e.g. a Redis-backed limiter.
 
 import { createBucketState, take } from '../src/core/tokenBucket.js';
+import { PRIORITY_EXPAND } from './_lib/rateGate.js';
 
 // Discogs allows 60 req/min authenticated as a ROLLING window, so the binding
 // invariant is `capacity + refill/min <= 60`: a fully-cold run drains the burst
@@ -44,7 +45,8 @@ export class RateLimiter {
     const url = new URL(request.url);
     const key = url.searchParams.get('key') ?? 'discogs';
     const opts = BUCKETS[key] ?? BUCKETS.discogs;
-    const reserve = url.searchParams.get('priority') === 'expand' ? (opts.expandReserve ?? 0) : 0;
+    const reserve =
+      url.searchParams.get('priority') === PRIORITY_EXPAND ? (opts.expandReserve ?? 0) : 0;
     const now = Date.now();
     const state = this.states.get(key) ?? createBucketState(now, opts);
     const result = take(state, now, { ...opts, reserve });

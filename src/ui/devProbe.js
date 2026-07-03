@@ -4,9 +4,30 @@ const NOOP_PROBE = {
   onAttempt() {},
   note() {},
   providerResult() {},
-  serverCache() {},
   lookupStats() {},
 };
+
+// One vocabulary for upstream-cost stats ({ calls, retries, status429,
+// gateWaitMs }), shared by the per-node tags (main.js) and the per-provider
+// roll-up below so the two dev-probe surfaces can't drift apart.
+export function formatStatsParts(stats) {
+  const parts = [`${stats.calls ?? 0} calls`];
+  if (stats.status429) parts.push(`429×${stats.status429}`);
+  if (stats.retries) parts.push(`${stats.retries} retries`);
+  // Sub-100ms gate waits are noise, not backpressure.
+  if (stats.gateWaitMs >= 100) parts.push(`gate ${(stats.gateWaitMs / 1000).toFixed(1)}s`);
+  return parts;
+}
+
+// 'H:3/M:9/S:1' shorthand for an L2 outcome tally — shared by the per-act
+// summaries and the per-provider roll-up.
+function formatCacheBits(t) {
+  const bits = [];
+  if (t.HIT) bits.push(`H:${t.HIT}`);
+  if (t.MISS) bits.push(`M:${t.MISS}`);
+  if (t.STALE) bits.push(`S:${t.STALE}`);
+  return bits;
+}
 
 export function createDevProbe() {
   if (import.meta.env.MODE === 'production') return NOOP_PROBE;
@@ -26,7 +47,6 @@ export function createDevProbe() {
   // One collapsible group per lineup act, so a big run reads as ~N act summaries
   // instead of hundreds of per-node lines (the walk detail stays one click away).
   const actGroups = new Map();
-  const serverTally = { HIT: 0, MISS: 0, STALE: 0 };
 
   // Run-wide summary block: the L2 (D1 quad store) cache roll-up plus one
   // upstream-stats line per provider. Created eagerly and pinned as the first
@@ -39,10 +59,19 @@ export function createDevProbe() {
   summaryRow.append(serverCacheLine);
   // provider name -> { line: div, tally } for the per-provider upstream stats.
   const providerStats = new Map();
+  // The run-wide L2 line is DERIVED from the per-provider tallies — one stream
+  // of events, one set of counters, so the header can't contradict the
+  // per-provider lines. Run a lineup in a second browser to see HITs climb —
+  // that proves the cross-visitor cache works.
   function renderServerCache() {
+    const sum = { HIT: 0, MISS: 0, STALE: 0 };
+    for (const { tally } of providerStats.values()) {
+      sum.HIT += tally.HIT;
+      sum.MISS += tally.MISS;
+      sum.STALE += tally.STALE;
+    }
     serverCacheLine.textContent =
-      `server-cache · HIT=${serverTally.HIT}` +
-      ` · MISS=${serverTally.MISS} · STALE=${serverTally.STALE}`;
+      `server-cache · HIT=${sum.HIT}` + ` · MISS=${sum.MISS} · STALE=${sum.STALE}`;
   }
   renderServerCache();
   list.append(summaryRow);
@@ -50,9 +79,6 @@ export function createDevProbe() {
   function reset() {
     rows.clear();
     actGroups.clear();
-    serverTally.HIT = 0;
-    serverTally.MISS = 0;
-    serverTally.STALE = 0;
     providerStats.clear();
     summaryRow.replaceChildren(serverCacheLine);
     renderServerCache();
@@ -144,10 +170,7 @@ export function createDevProbe() {
     detail.textContent = line;
     group.details.append(detail);
 
-    const cacheBits = [];
-    if (t.HIT) cacheBits.push(`H:${t.HIT}`);
-    if (t.MISS) cacheBits.push(`M:${t.MISS}`);
-    if (t.STALE) cacheBits.push(`S:${t.STALE}`);
+    const cacheBits = formatCacheBits(t);
     const parts = [`${act}`, `${t.n} lookups`];
     if (cacheBits.length) parts.push(`L2 ${cacheBits.join('/')}`);
     if (t.err) parts.push(`${t.err} err`);
@@ -155,20 +178,11 @@ export function createDevProbe() {
     group.summary.className = t.err ? 'state-fail' : 'state-info';
   }
 
-  // Rolling tally of the shared L2 (D1 quad store) cache outcomes. Run a lineup
-  // in a second browser to see HITs climb — that proves the cross-visitor cache
-  // works. The row itself is created eagerly above and pinned to the top.
-  function serverCache(outcome) {
-    if (!outcome || !(outcome in serverTally)) return;
-    serverTally[outcome]++;
-    el.hidden = false;
-    renderServerCache();
-  }
-
   // Per-provider run roll-up: lookup + L2 outcome counts always; upstream call/
   // retry/429/gate-wait totals when the server sent stats (cold lookups only).
   // This is the cold-run cost accounting — one glance says which provider's
-  // budget the run actually spent (and wasted, via retries/429s).
+  // budget the run actually spent (and wasted, via retries/429s). Also feeds
+  // the derived run-wide server-cache line above.
   function lookupStats(provider, { serverCache: label, ok = true, stats } = {}) {
     if (!provider) return;
     let entry = providerStats.get(provider);
@@ -203,21 +217,16 @@ export function createDevProbe() {
       t.gateWaitMs += stats.gateWaitMs ?? 0;
     }
 
-    const cacheBits = [];
-    if (t.HIT) cacheBits.push(`H:${t.HIT}`);
-    if (t.MISS) cacheBits.push(`M:${t.MISS}`);
-    if (t.STALE) cacheBits.push(`S:${t.STALE}`);
+    const cacheBits = formatCacheBits(t);
     const parts = [provider, `${t.lookups} lookups`];
     if (cacheBits.length) parts.push(`L2 ${cacheBits.join('/')}`);
-    parts.push(`${t.calls} upstream calls`);
-    if (t.retries) parts.push(`${t.retries} retries`);
-    if (t.status429) parts.push(`429×${t.status429}`);
-    if (t.gateWaitMs) parts.push(`gate ${(t.gateWaitMs / 1000).toFixed(1)}s`);
+    parts.push(...formatStatsParts(t));
     if (t.err) parts.push(`${t.err} err`);
     entry.line.textContent = parts.join(' · ');
 
+    renderServerCache();
     el.hidden = false;
   }
 
-  return { el, reset, onAttempt, note, providerResult, serverCache, lookupStats };
+  return { el, reset, onAttempt, note, providerResult, lookupStats };
 }

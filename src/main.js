@@ -4,7 +4,7 @@ import { createInputScreen } from './ui/inputScreen.js';
 import { createGraphScreen } from './ui/graphScreen.js';
 import { createEmptyGraphScreen } from './ui/emptyGraphScreen.js';
 import { createListScreen } from './ui/listScreen.js';
-import { createDevProbe } from './ui/devProbe.js';
+import { createDevProbe, formatStatsParts } from './ui/devProbe.js';
 import { lookupAll } from './core/lookup.js';
 import { detectInputType, extractArtists, combineExtractions } from './core/extract.js';
 import { cleanHTML } from './core/cleanHTML.js';
@@ -212,7 +212,6 @@ async function runLineup(artists, signal, { urlUpdate = 'replace', view = 'graph
         ok: outcome.ok,
         serverCache: outcome.serverCache,
       });
-      if (outcome.serverCache) devProbe.serverCache(outcome.serverCache);
       devProbe.lookupStats(provider, {
         serverCache: outcome.serverCache,
         ok: outcome.ok,
@@ -466,13 +465,11 @@ function formatProviderNote(artist, provider, outcome) {
 
 // Per-node upstream cost, present only on cold lookups. Flags the pathological
 // nodes: long gate waits and 429 retries stand out in the act's detail list.
+// Same vocabulary as the run roll-up (formatStatsParts) so the two dev-probe
+// surfaces always read alike.
 function formatStatsTag(stats) {
   if (!stats) return '';
-  const parts = [`${stats.calls} calls`];
-  if (stats.status429) parts.push(`429×${stats.status429}`);
-  else if (stats.retries) parts.push(`${stats.retries} retries`);
-  if (stats.gateWaitMs >= 100) parts.push(`gate ${(stats.gateWaitMs / 1000).toFixed(1)}s`);
-  return ` · ${parts.join(' · ')}`;
+  return ` · ${formatStatsParts(stats).join(' · ')}`;
 }
 
 function summariseResult(r) {

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { runClosure } from '../server/api/closure.js';
+import { fakeRateLimiterNs } from './helpers/fakeRateLimiter.js';
 import { resultToQuads, sourceKeyFor } from '../src/core/quads.js';
 import { normaliseName } from '../src/core/merge.js';
 import { SCHEMA_VERSION } from '../src/core/schemaVersion.js';
@@ -182,19 +183,8 @@ describe('runClosure (SSE endpoint core)', () => {
 
   it('takes rate-gate tokens at root priority for the root, expand for interior nodes', async () => {
     const store = fakeStore();
-    const gateUrls = [];
-    const envWithGate = {
-      DISCOGS_TOKEN: 'tok',
-      RATE_LIMITER: {
-        idFromName: (name) => name,
-        get: () => ({
-          fetch: async (url) => {
-            gateUrls.push(url);
-            return { json: async () => ({ granted: true }) };
-          },
-        }),
-      },
-    };
+    const ns = fakeRateLimiterNs([{ granted: true }]);
+    const envWithGate = { DISCOGS_TOKEN: 'tok', RATE_LIMITER: ns };
     // Root has one walkable alias so the walk does exactly one interior lookup;
     // Discogs searches return no match (one gated call per node).
     const fetchFn = benignFetch([
@@ -215,10 +205,44 @@ describe('runClosure (SSE endpoint core)', () => {
       emit: cap.emit,
     });
 
-    const tiers = gateUrls.map((u) => new URL(u).searchParams.get('priority'));
+    const tiers = ns.urls.map((u) => new URL(u).searchParams.get('priority'));
     expect(tiers[0]).toBe('root');
     expect(tiers).toContain('expand');
     expect(tiers.filter((t) => t === 'root').length).toBe(1);
+  });
+
+  it('stops the walk at the next node once the signal aborts', async () => {
+    const store = fakeStore();
+    // Root has a walkable alias, so an un-aborted walk would do a second node.
+    await seedHit(store, 'musicbrainz', 'Solo Artist', {
+      ...empty,
+      aliases: [{ name: 'Second Self' }],
+    });
+    const fetchFn = benignFetch();
+    const signal = { aborted: false };
+    const cap = capture();
+    let providerEvents = 0;
+    const emit = (event, data) => {
+      // Client disconnects right after the root's own two provider lookups,
+      // before the walk reads the alias node.
+      if (event === 'provider' && ++providerEvents === 2) signal.aborted = true;
+      cap.emit(event, data);
+    };
+    await expect(
+      runClosure(env, {
+        root: 'Solo Artist',
+        roots: ['Solo Artist'],
+        store,
+        now: () => 1,
+        fetchFn,
+        emit,
+        signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    // Only the root's cold Discogs lookup hit the wire (MB was seeded); the
+    // alias node was never fetched.
+    const lookedUp = cap.of('provider').map((p) => p.name);
+    expect(lookedUp).toEqual(['Solo Artist', 'Solo Artist']);
   });
 
   it('emits an error event when no graph substrate is available', async () => {
