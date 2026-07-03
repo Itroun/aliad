@@ -17,6 +17,7 @@
 import { checkRateLimit } from '../_lib/kvLimit.js';
 import { awaitDiscogsSlot, PRIORITY_ROOT } from '../_lib/rateGate.js';
 import { makeD1Store } from '../_lib/quadStore.js';
+import { makeDumpStore } from '../_lib/dumpStore.js';
 import { SCHEMA_VERSION } from '../../src/core/schemaVersion.js';
 import { normaliseName } from '../../src/core/merge.js';
 import { fetchWithRetry } from '../../src/core/fetchWithRetry.js';
@@ -59,6 +60,9 @@ const PROVIDERS = {
     // Gate upstream calls through the global RateLimiter DO. MB is left
     // best-effort (CLAUDE.md rate-limits note); only Discogs 429s in practice.
     gated: true,
+    // Consult the Turso Discogs dump before the wire: a dump hit maps straight
+    // to a result with no gate token and no API call. Only Discogs has a dump.
+    dump: true,
     requiresToken: true,
     headers: (env) => ({
       Authorization: `Discogs token=${env.DISCOGS_TOKEN}`,
@@ -108,7 +112,30 @@ async function getJson(url, { headers, fetchFn, retry, sleep, signal, stats }) {
 // the same selection/mapping as the browser used to, now server-side.
 // Mutates `stats` (calls/retries/429s/gate wait) as it goes so the collector is
 // meaningful even when the pipeline throws mid-way (the STALE/502 paths).
-async function lookupUpstream(cfg, env, name, { fetchFn, sleep, signal, stats, priority }) {
+async function lookupUpstream(
+  cfg,
+  env,
+  name,
+  { fetchFn, sleep, signal, stats, priority, dumpStore },
+) {
+  // Dump-first: a local Discogs-dump hit maps straight to a result — no gate
+  // token, no wire call. `null` means the name is absent from the dump (fall
+  // through to the live search); a thrown error means the dump is unreachable
+  // (degrade to the wire). A present-but-relation-less artist still counts as a
+  // hit (empty result), keeping obscure roots off the API.
+  if (cfg.dump && dumpStore) {
+    let details;
+    try {
+      details = await dumpStore.getArtist(normaliseName(name), { signal });
+    } catch {
+      details = undefined; // dump unreachable → fall through to the wire
+    }
+    if (details) {
+      stats.dumpHit = true;
+      return cfg.mapDetails(details);
+    }
+  }
+
   const headers = cfg.headers(env);
   // Gate at the WIRE level, not per logical call: every attempt fetchWithRetry
   // fires — retries included — takes one token, so the outbound rate can never
@@ -155,6 +182,7 @@ export async function handleLookup(
     sleep,
     now = Date.now,
     store,
+    dumpStore,
     priority = PRIORITY_ROOT,
     signal,
   },
@@ -174,15 +202,25 @@ export async function handleLookup(
   const nameKey = normaliseName(name);
   if (!nameKey) return ok(emptyResult(), 'BYPASS');
 
-  const stats = { calls: 0, retries: 0, status429: 0, gateWaitMs: 0 };
+  const stats = { calls: 0, retries: 0, status429: 0, gateWaitMs: 0, dumpHit: false };
 
-  // store is injectable for tests; default to the D1-backed adapter when bound.
+  // Both stores are injectable for tests; default to the real adapters when
+  // their bindings are present (each returns null / is null when unbound, so the
+  // pipeline degrades to today's gated wire path).
   const graph = store ?? (env?.DB ? makeD1Store(env.DB) : null);
+  const dump = dumpStore ?? (env ? makeDumpStore(env) : null);
 
   // Degraded: no D1 bound → straight upstream, no caching (same posture as kvLimit).
   if (!graph) {
     return ok(
-      await lookupUpstream(cfg, env, name, { fetchFn, sleep, signal, stats, priority }),
+      await lookupUpstream(cfg, env, name, {
+        fetchFn,
+        sleep,
+        signal,
+        stats,
+        priority,
+        dumpStore: dump,
+      }),
       'BYPASS',
       stats,
     );
@@ -209,7 +247,14 @@ export async function handleLookup(
 
   let result;
   try {
-    result = await lookupUpstream(cfg, env, name, { fetchFn, sleep, signal, stats, priority });
+    result = await lookupUpstream(cfg, env, name, {
+      fetchFn,
+      sleep,
+      signal,
+      stats,
+      priority,
+      dumpStore: dump,
+    });
   } catch (err) {
     // Stale-on-error: serve a prior (expired) entry's quads rather than failing.
     if (lookupRow) {

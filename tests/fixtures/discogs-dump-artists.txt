@@ -1,0 +1,7 @@
+# synthetic dump lines matching the real Discogs artists XML schema; parseArtist skips any non-<artist> line (this comment, the xml decl, the wrapper tags)
+<?xml version="1.0" encoding="UTF-8"?>
+<artists>
+<artist><images><image height="337" type="primary" uri="" uri150="" width="600"/></images><id>10</id><name>Møbius &amp; Co.</name><realname>Real Person</realname><profile>A test profile.</profile><data_quality>Correct</data_quality><urls><url>https://example.org</url></urls><namevariations><name>Mobius and Co</name><name>Møbius</name></namevariations><aliases><name id="20">Sølo Act</name><name id="21">Alter Ego</name></aliases><groups><name id="30">The Collective</name></groups><members><id>40</id><name id="40">First Member</name><id>41</id><name id="41">Second Member</name></members></artist>
+<artist><id>11</id><name>Lonely Solo</name><profile></profile><data_quality>Needs Vote</data_quality></artist>
+<artist><id>12</id><name>Sunn O)))</name><namevariations><name>Caf&#233; del Mar</name></namevariations><aliases><name id="50">R&amp;B Star</name><name id="51">&#x266B; Music</name></aliases></artist>
+</artists>

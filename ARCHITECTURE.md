@@ -93,6 +93,44 @@ pre-graph version.
   every `source_key`, so MB + Discogs finally union per node instead of being two
   separate blobs. This is what makes the closure a real cross-source graph.
 
+## The Discogs dump substrate
+
+A fully-cold large lineup is Discogs-budget-bound: the measured 144-act run was
+695 Discogs wire calls / 12.4 minutes, purely rate-gated. So the Discogs
+"upstream" is consulted from a **read-only monthly snapshot** before the network.
+A hit maps straight to a result with **no rate-gate token and no API call**, which
+turns the gate into a guard over only the _fallback_ path (names the snapshot
+doesn't know).
+
+- **Rebuildable snapshot, not a source of truth.** `scripts/dump/build.js` ingests
+  the monthly Discogs artists dump (line-delimited XML) into a SQLite file —
+  `dump_names` (one collision winner per `norm_name`), `dump_edges` (identity
+  relations by artist id), `dump_meta` — then `scripts/dump/upload.js` pushes it to
+  a Turso database. The Worker reads it over the Turso `/v2/pipeline` protocol via
+  `server/_lib/dumpStore.js` (a plain-`fetch` adapter, like every other binding).
+  Nothing writes back; a rebuild fully replaces it.
+- **Full name index.** _Every_ artist is indexed, namevariations included, even
+  those with zero relations — presence with no edges is a "known empty" answer that
+  keeps relation-less obscure roots (the bulk of festival bookings) off the API.
+  Dump relations are reciprocal, so every edge target itself has ≥1 relation;
+  trimming to relation-having artists would only ever hurt roots, never the walk.
+- **Ingest-time tie-break.** Many artists share a `norm_name`
+  (`normaliseName(stripDisambiguation(raw))`, the production identity key — the real
+  `src/` functions, so keys match exactly). `scripts/dump/resolveWinner.js` picks
+  one deterministic winner per name: primary name > namevariation → unsuffixed >
+  `(N)`-suffixed → more edges > fewer → lowest artist id. Pure and unit-tested.
+- **Degrade-open invariant.** `TURSO_DUMP_URL`/`TURSO_DUMP_TOKEN` unbound →
+  `makeDumpStore` returns null; Turso unreachable → `getArtist` throws. Either way
+  the lookup falls through to today's gated search+details path. The rate gate,
+  HIT/MISS/STALE, TTLs, quad writes, and stale-on-error are all untouched — the gate
+  simply idles when the dump answers. A dump hit still writes quads, so the next
+  lookup of that name is a plain D1 HIT.
+- **Refresh cadence.** A monthly snapshot, refreshed manually (runbook in
+  CLAUDE.md). Mid-month edits to existing artists wait for the next dump; names
+  absent from the snapshot fall back to the live API every time. MusicBrainz is out
+  of scope — the gate change measures how MB behaves as the only thing on the wire,
+  and any MB decision is a follow-up with data.
+
 ## The closure query, and its hard-won rules
 
 `server/api/closure.js` drives the walk: for each node it calls `handleLookup`
