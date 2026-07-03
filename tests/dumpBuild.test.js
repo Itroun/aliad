@@ -12,10 +12,25 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 const norm = (raw) => normaliseName(stripDisambiguation(raw));
 
-// build.js needs the experimental SQLite flag, which vitest's process doesn't
-// carry — so drive it (and read the result) through `node --experimental-sqlite`
-// subprocesses. `buildAndRead` gzips a dump buffer, builds a DB, and reads it
-// back as plain JSON.
+// build.js needs node:sqlite, which vitest's process doesn't expose — so drive
+// it (and read the result) through node subprocesses. Whether that needs a flag
+// depends on the Node version: node:sqlite is behind --experimental-sqlite on
+// 22.5–23.3, unflagged from 23.4, and absent before 22.5 (where the flag is a
+// hard `bad option` error — this broke CI on Node 20). Probe instead of
+// hardcoding; null means node:sqlite is unavailable and the suites skip.
+function sqliteNodeArgs() {
+  const probe = "require('node:sqlite')";
+  if (spawnSync('node', ['-e', probe]).status === 0) return [];
+  if (spawnSync('node', ['--experimental-sqlite', '-e', probe]).status === 0) {
+    return ['--experimental-sqlite'];
+  }
+  return null;
+}
+const SQLITE_ARGS = sqliteNodeArgs();
+const describeSqlite = SQLITE_ARGS === null ? describe.skip : describe;
+
+// `buildAndRead` gzips a dump buffer, builds a DB, and reads it back as plain
+// JSON.
 function buildAndRead(fixtureBuffer, dumpDate = '2026-07-01') {
   const dir = mkdtempSync(join(tmpdir(), 'aliad-dump-'));
   const gz = join(dir, 'artists.xml.gz');
@@ -25,7 +40,7 @@ function buildAndRead(fixtureBuffer, dumpDate = '2026-07-01') {
   const build = spawnSync(
     'node',
     [
-      '--experimental-sqlite',
+      ...SQLITE_ARGS,
       join(root, 'scripts/dump/build.js'),
       '--input',
       gz,
@@ -43,7 +58,7 @@ function buildAndRead(fixtureBuffer, dumpDate = '2026-07-01') {
   const read = spawnSync(
     'node',
     [
-      '--experimental-sqlite',
+      ...SQLITE_ARGS,
       '-e',
       `const {DatabaseSync}=require('node:sqlite');
        const db=new DatabaseSync(process.argv[1]);
@@ -60,7 +75,7 @@ function buildAndRead(fixtureBuffer, dumpDate = '2026-07-01') {
   return { summary, ...JSON.parse(read.stdout.trim()) };
 }
 
-describe('buildDump (end-to-end via subprocess)', () => {
+describeSqlite('buildDump (end-to-end via subprocess)', () => {
   let built;
   beforeAll(() => {
     built = buildAndRead(readFileSync(join(here, 'fixtures', 'discogs-dump-artists.txt')));
@@ -117,7 +132,7 @@ describe('buildDump (end-to-end via subprocess)', () => {
 // continuation line; feeding parseArtist one physical line at a time drops them
 // (measured: ~1 M edges lost on the full dump). The build must buffer
 // <artist>…</artist> across lines.
-describe('buildDump multi-line records', () => {
+describeSqlite('buildDump multi-line records', () => {
   const multiline = [
     '<artists>',
     '<artist><id>50</id><name>Split Artist</name><profile>Line one of the bio.',
