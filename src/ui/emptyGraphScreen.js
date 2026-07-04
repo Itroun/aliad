@@ -1,5 +1,5 @@
 import { createViewTabs } from './viewTabs.js';
-import { mountThemeToggle } from './themeToggle.js';
+import { mountTopbarActions } from './topbarActions.js';
 
 export function createEmptyGraphScreen({ onViewChange } = {}) {
   const root = document.createElement('div');
@@ -26,7 +26,7 @@ export function createEmptyGraphScreen({ onViewChange } = {}) {
   const tabs = createViewTabs({ onChange: (v) => onViewChange?.(v) });
   tabs.setActive('graph');
   root.querySelector('.topbar-tabs').append(tabs.el);
-  mountThemeToggle(root.querySelector('.topbar'));
+  mountTopbarActions(root.querySelector('.topbar'));
 
   root.querySelector('.empty-graph-go').addEventListener('click', () => onViewChange?.('input'));
 

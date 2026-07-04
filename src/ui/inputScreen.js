@@ -1,7 +1,7 @@
 import { dedupeNames } from '../core/merge.js';
 import { classifyInput } from '../core/classifyInput.js';
 import { createViewTabs } from './viewTabs.js';
-import { mountThemeToggle } from './themeToggle.js';
+import { mountTopbarActions } from './topbarActions.js';
 
 export function parseLineup(text) {
   return dedupeNames(String(text ?? '').split('\n'));
@@ -98,11 +98,6 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
           <span class="decode-label">Map lineup</span><span class="decode-spinner" aria-hidden="true"></span>
         </button>
       </div>
-
-      <div class="input-footer">
-        <span class="footer-mark">aliad</span>
-        <a class="footer-link" href="https://github.com/Itroun/aliad" target="_blank" rel="noopener noreferrer">github</a>
-      </div>
     </main>
   `;
 
@@ -122,7 +117,11 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   const inputTitle = root.querySelector('.input-title');
   const syncFieldWidth = () => {
     const w = inputTitle.getBoundingClientRect().width;
-    if (w) root.style.setProperty('--field-w', `${Math.round(w)}px`);
+    if (!w) return;
+    root.style.setProperty('--field-w', `${Math.round(w)}px`);
+    // Also publish to the document root so the body-level About dialog can size
+    // itself relative to the input column (it lives outside this screen's tree).
+    document.documentElement.style.setProperty('--field-w', `${Math.round(w)}px`);
   };
   new ResizeObserver(syncFieldWidth).observe(inputTitle);
 
@@ -269,7 +268,7 @@ export function createInputScreen({ onSubmit, onCancel, onViewChange } = {}) {
   const tabs = createViewTabs({ onChange: (v) => onViewChange?.(v) });
   tabs.setActive('input');
   root.querySelector('.topbar-tabs').append(tabs.el);
-  mountThemeToggle(root.querySelector('.topbar'));
+  mountTopbarActions(root.querySelector('.topbar'));
 
   return { el: root, setActiveView: tabs.setActive, setBusy, clearBusy, setError, clearError };
 }

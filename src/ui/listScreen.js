@@ -7,7 +7,7 @@
 import { buildExportModel, toPlainText } from '../core/lineupExport.js';
 import { noConnectionsHeading } from '../core/labels.js';
 import { createViewTabs } from './viewTabs.js';
-import { mountThemeToggle } from './themeToggle.js';
+import { mountTopbarActions } from './topbarActions.js';
 
 export function createListScreen({ onViewChange } = {}) {
   const root = document.createElement('div');
@@ -32,7 +32,7 @@ export function createListScreen({ onViewChange } = {}) {
   const tabs = createViewTabs({ onChange: (v) => onViewChange?.(v) });
   tabs.setActive('list');
   root.querySelector('.topbar-tabs').append(tabs.el);
-  mountThemeToggle(root.querySelector('.topbar'));
+  mountTopbarActions(root.querySelector('.topbar'));
 
   const scroll = root.querySelector('.list-scroll');
   const copyBtn = root.querySelector('.list-copy');

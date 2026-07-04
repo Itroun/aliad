@@ -5,7 +5,7 @@ import { createGraphPane } from './graph/render.js';
 import { computeFitTransform, zoomAtPoint } from './graph/viewport.js';
 import { createFocusPanel } from './graph/focusPanel.js';
 import { createViewTabs } from './viewTabs.js';
-import { mountThemeToggle } from './themeToggle.js';
+import { mountTopbarActions } from './topbarActions.js';
 import { noConnectionsHeading } from '../core/labels.js';
 
 export function createGraphScreen({ lineup, onViewChange }) {
@@ -53,7 +53,7 @@ export function createGraphScreen({ lineup, onViewChange }) {
   const tabs = createViewTabs({ onChange: (v) => onViewChange?.(v) });
   tabs.setActive('graph');
   root.querySelector('.topbar-tabs').append(tabs.el);
-  mountThemeToggle(root.querySelector('.topbar'));
+  mountTopbarActions(root.querySelector('.topbar'));
 
   const pane = createGraphPane();
   graphRegion.append(pane.el);
