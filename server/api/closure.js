@@ -25,7 +25,12 @@ import { identityClosure } from '../../src/core/closure.js';
 
 // The providers the walk consults per node. Mirrors the PROVIDERS map in
 // functions/api/lookup.js (which is not exported); keep the two in sync.
-const PROVIDER_NAMES = ['musicbrainz', 'discogs'];
+// TEMP: 'musicbrainz' removed — post-dump, MB's ungated 1/sec wire path
+// dominates wall time (measured 655 calls / 282 retries / 29 hard failures on
+// one 67-act run) and 503-spirals under parallel streams. MB quads already in
+// D1 still enrich the union via getQuadsTouching; restore the entry when the
+// MB substrate (D4.2) or an MB rate gate lands.
+const PROVIDER_NAMES = ['discogs'];
 
 /**
  * Run one root's closure, emitting SSE events through `emit(event, data)`.

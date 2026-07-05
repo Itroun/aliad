@@ -90,7 +90,10 @@ const env = { DISCOGS_TOKEN: 'tok' };
 describe('runClosure (SSE endpoint core)', () => {
   it('walks a pre-seeded substrate and streams provider/progress/done events', async () => {
     const store = fakeStore();
-    await seedHit(store, 'musicbrainz', 'Shpongle', { ...empty, members: [{ name: 'Raja Ram' }] });
+    await seedHit(store, 'discogs', 'Shpongle', { ...empty, members: [{ name: 'Raja Ram' }] });
+    // Seeded under musicbrainz, which the walk no longer consults (TEMP removal
+    // in closure.js): the quads must still enrich the union via
+    // getQuadsTouching — dormant MB data keeps contributing.
     await seedHit(store, 'musicbrainz', 'Raja Ram', {
       ...empty,
       groups: [{ name: 'The Infinity Project' }],
@@ -112,15 +115,15 @@ describe('runClosure (SSE endpoint core)', () => {
     expect(done.closure).toContain('shpongle');
     expect(done.closure).toContain('raja ram');
 
-    // Root's MB lookup is a HIT off the seeded substrate; at least one progress
-    // event carried the running merged.
-    const mbRoot = of('provider').find(
-      (p) => p.name === 'Shpongle' && p.provider === 'musicbrainz',
-    );
-    expect(mbRoot.serverCache).toBe('HIT');
+    // Root's Discogs lookup is a HIT off the seeded substrate; at least one
+    // progress event carried the running merged.
+    const dgRoot = of('provider').find((p) => p.name === 'Shpongle' && p.provider === 'discogs');
+    expect(dgRoot.serverCache).toBe('HIT');
     // A HIT never consulted the upstream, so it carries no stats.
-    expect(mbRoot.stats).toBeUndefined();
+    expect(dgRoot.stats).toBeUndefined();
     expect(of('progress').length).toBeGreaterThan(0);
+    // MB is TEMP-removed from the walk: no lookups, no provider events.
+    expect(of('provider').filter((p) => p.provider === 'musicbrainz')).toHaveLength(0);
   });
 
   it('unions a node`s edges across providers (the Phase 3 cross-provider win)', async () => {
@@ -153,8 +156,8 @@ describe('runClosure (SSE endpoint core)', () => {
   it('drives a cold fetch through handleLookup, writing the substrate', async () => {
     const store = fakeStore();
     const fetchFn = benignFetch([
-      ['/artist?', { artists: [{ id: 'mb1', name: 'Solo Artist', score: 100 }] }],
-      ['/artist/mb1', { id: 'mb1', aliases: [{ name: 'SA', type: 'Search hint' }], relations: [] }],
+      ['/database/search?q=Solo', { results: [{ id: 7, title: 'Solo Artist' }] }],
+      ['/artists/7', { id: 7, aliases: [{ name: 'SA' }] }],
     ]);
 
     const cap = capture();
@@ -167,13 +170,11 @@ describe('runClosure (SSE endpoint core)', () => {
       emit: cap.emit,
     });
 
-    const mb = cap
-      .of('provider')
-      .find((p) => p.name === 'Solo Artist' && p.provider === 'musicbrainz');
-    expect(mb.serverCache).toBe('MISS');
-    expect(mb.ok).toBe(true);
+    const dg = cap.of('provider').find((p) => p.name === 'Solo Artist' && p.provider === 'discogs');
+    expect(dg.serverCache).toBe('MISS');
+    expect(dg.ok).toBe(true);
     // Cold lookup → the event carries the upstream telemetry (search + details).
-    expect(mb.stats).toEqual({
+    expect(dg.stats).toEqual({
       calls: 2,
       retries: 0,
       status429: 0,
@@ -182,25 +183,24 @@ describe('runClosure (SSE endpoint core)', () => {
       dumpError: 0,
     });
     // The fetched result was decomposed into the substrate.
-    expect(store.lookups.has('musicbrainz:solo artist')).toBe(true);
+    expect(store.lookups.has('discogs:solo artist')).toBe(true);
     const [done] = cap.of('done');
     expect(done.merged.aliases.map((a) => a.name)).toContain('SA');
-    expect(done.queried).toContain('musicbrainz');
+    expect(done.queried).toContain('discogs');
   });
 
   it('takes rate-gate tokens at root priority for the root, expand for interior nodes', async () => {
     const store = fakeStore();
     const ns = fakeRateLimiterNs([{ granted: true }]);
     const envWithGate = { DISCOGS_TOKEN: 'tok', RATE_LIMITER: ns };
-    // Root has one walkable alias so the walk does exactly one interior lookup;
-    // Discogs searches return no match (one gated call per node).
-    const fetchFn = benignFetch([
-      [
-        '/artist?query=artist%3A%22Solo',
-        { artists: [{ id: 'mb1', name: 'Solo Artist', score: 100 }] },
-      ],
-      ['/artist/mb1', { id: 'mb1', aliases: [{ name: 'Second Self' }], relations: [] }],
-    ]);
+    // A dormant MB seed gives the root one walkable alias, so the walk does
+    // exactly one interior lookup; Discogs searches return no match (one gated
+    // call per node).
+    await seedHit(store, 'musicbrainz', 'Solo Artist', {
+      ...empty,
+      aliases: [{ name: 'Second Self' }],
+    });
+    const fetchFn = benignFetch();
 
     const cap = capture();
     await runClosure(envWithGate, {
@@ -230,9 +230,9 @@ describe('runClosure (SSE endpoint core)', () => {
     const cap = capture();
     let providerEvents = 0;
     const emit = (event, data) => {
-      // Client disconnects right after the root's own two provider lookups,
-      // before the walk reads the alias node.
-      if (event === 'provider' && ++providerEvents === 2) signal.aborted = true;
+      // Client disconnects right after the root's own provider lookup (one per
+      // node with MB TEMP-removed), before the walk reads the alias node.
+      if (event === 'provider' && ++providerEvents === 1) signal.aborted = true;
       cap.emit(event, data);
     };
     await expect(
@@ -246,10 +246,10 @@ describe('runClosure (SSE endpoint core)', () => {
         signal,
       }),
     ).rejects.toMatchObject({ name: 'AbortError' });
-    // Only the root's cold Discogs lookup hit the wire (MB was seeded); the
-    // alias node was never fetched.
+    // Only the root's cold Discogs lookup hit the wire; the alias node was
+    // never fetched.
     const lookedUp = cap.of('provider').map((p) => p.name);
-    expect(lookedUp).toEqual(['Solo Artist', 'Solo Artist']);
+    expect(lookedUp).toEqual(['Solo Artist']);
   });
 
   it('emits an error event when no graph substrate is available', async () => {
