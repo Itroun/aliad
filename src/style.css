@@ -1939,9 +1939,10 @@ body > #app {
   padding: 0;
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius);
-  /* Navy panel lifted off the near-black page — not flat black. Light theme
-     keeps the cream page colour (override below). */
-  background: #122043;
+  /* Navy panel lifted off the near-black page — not flat black, but close to
+     the page tone so it reads as part of it. Light theme keeps the cream page
+     colour (override below). */
+  background: #0d1730;
   color: var(--body);
   /* A touch wider than the input column (--field-w) so it sits tidily over the
      hero + paste field; falls back before the width is measured. */
