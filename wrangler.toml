@@ -13,12 +13,13 @@ binding = "ASSETS"
 run_worker_first = true
 
 # Origin/Referer allowlist for the /api/* proxies (server/_lib/originCheck.js).
-# Comma-separated list of allowed origins, e.g. the prod domain plus the
-# *.pages.dev preview. Unset → the check degrades open (fine for local
-# `wrangler dev`); MUST be set before/at deploy or the paid proxies are open to
-# any site's browser JS. Set it as a deploy-time var, not committed here:
-#   npx wrangler deploy --var ALLOWED_ORIGIN:https://your-domain,https://aliad.app
-# (or add it under [vars] / the dashboard once the domain is known).
+# Comma-separated list of allowed origins. Unset → the check degrades open (fine
+# for local `wrangler dev`, where this section is ignored); MUST be set at deploy
+# or the paid proxies are open to any site's browser JS. Committed here as a
+# non-secret [vars] entry (it's just the public origin) so it can't be forgotten
+# on a redeploy — a per-deploy `--var` would silently open the gate if omitted.
+[vars]
+ALLOWED_ORIGIN = "https://aliad.app"
 
 # KV namespace for rate limiting and the Anthropic daily request ceiling.
 # Local dev uses a filesystem-backed KV so the `id` here is a placeholder.
