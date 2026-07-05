@@ -26,7 +26,7 @@ run_worker_first = true
 # the id below with the real 32-char namespace id.
 [[kv_namespaces]]
 binding = "KV"
-id = "local-placeholder-replace-before-deploy"
+id = "d433017f16f94ee99612fb0c01aef3d7"
 
 # D1 (SQLite) graph substrate for the lookup cache (Phase 2). Local dev uses a
 # filesystem-backed SQLite so the `database_id` here is a placeholder. Before
@@ -36,7 +36,7 @@ id = "local-placeholder-replace-before-deploy"
 [[d1_databases]]
 binding = "DB"
 database_name = "aliad-graph"
-database_id = "local-placeholder-replace-before-deploy"
+database_id = "fd369074-366c-4802-b6f7-24492c002d0e"
 
 # Global Discogs rate limiter (server/rateLimiter.js). A single DO instance gives
 # a strongly-consistent token bucket shared across all parallel /api/closure
