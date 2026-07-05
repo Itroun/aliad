@@ -2,6 +2,15 @@ name = "aliad"
 main = "server/index.js"
 compatibility_date = "2026-06-01"
 
+# Custom domain. Attaches aliad.app directly to this Worker and auto-provisions
+# its TLS cert (no manual DNS record needed — Cloudflare creates the proxied
+# record). Requires the aliad.app zone to be Active in this account. This is the
+# committed source of truth for the serving origin; keep it in sync with
+# ALLOWED_ORIGIN below.
+[[routes]]
+pattern = "aliad.app"
+custom_domain = true
+
 # Static assets: the built Vite app in dist/. Requests that don't match an asset
 # fall through to the Worker (server/index.js), which owns the /api/* routes.
 [assets]
