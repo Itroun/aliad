@@ -31,4 +31,4 @@ jobs:
             --title "Discogs dump refresh due ($month)" \
             --label dump-refresh \
             --assignee "${GITHUB_REPOSITORY_OWNER}" \
-            --body "$(printf 'The %s Discogs data dump should be published by now.\n\nTo refresh: open the repo in Claude Code and run `/dump-refresh` — it checks whether the new dump is actually out, builds and uploads it, rotates the read credentials, and verifies the result against production.\n\nClose this issue once the new dump is verified live (the skill does this as its last step).' "$month")"
+            --body "$(printf 'The %s Discogs data dump should be published by now.\n\nClose this issue once the new dump is verified live (the `/dump-refresh` skill does this as its last step).' "$month")"
