@@ -1,4 +1,5 @@
 import { checkRateLimit, checkDailyCeiling, incrementDailyCeiling } from '../_lib/kvLimit.js';
+import { checkIpLimit } from '../_lib/ipLimit.js';
 import { ARTIST_SCHEMA, systemPromptFor } from '../../src/core/extractPrompt.js';
 import { parseArtists, runExtraction } from '../../src/core/extractCore.js';
 
@@ -22,8 +23,12 @@ const MAX_TOKENS_CAP = 4096;
 // posting a pathological blob straight to this endpoint. Well above the largest
 // real bake-off sample (~101k chars).
 const MAX_CONTENT_CHARS = 600_000;
-const RATE_LIMIT = 20;
-const RATE_WINDOW_SEC = 60;
+// Per-IP per-minute cap is 20/60s on the RL_OPENROUTER binding (wrangler.toml).
+// The two DAILY counters below stay on KV: the global ceiling needs one global
+// truth (the native binding is per-colo) and the per-IP sub-cap needs a 24h
+// window (the binding maxes out at 60s). Their KV write volume is self-bounded
+// by the ceiling itself, so they can't recreate the write-budget exhaustion
+// that moved everything else off KV.
 // Global per-day ceiling on upstream model CALLS (a cheap+fallback extraction is
 // two), set by OPENROUTER_DAILY_CALL_LIMIT. Named for what it counts — model
 // calls, the real cost unit — not requests, since one request can bill two.
@@ -76,12 +81,7 @@ export async function handle(context) {
 
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
 
-  const rate = await checkRateLimit(env, {
-    scope: 'openrouter',
-    ip,
-    limit: RATE_LIMIT,
-    windowSec: RATE_WINDOW_SEC,
-  });
+  const rate = await checkIpLimit(env, { binding: 'RL_OPENROUTER', ip });
   if (!rate.allowed) {
     return new Response('Too many requests', { status: 429 });
   }

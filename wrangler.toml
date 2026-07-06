@@ -30,13 +30,47 @@ run_worker_first = true
 [vars]
 ALLOWED_ORIGIN = "https://aliad.app"
 
-# KV namespace for rate limiting and the Anthropic daily request ceiling.
-# Local dev uses a filesystem-backed KV so the `id` here is a placeholder.
-# Before deploying, run `npx wrangler kv namespace create aliad-kv` and replace
-# the id below with the real 32-char namespace id.
+# KV namespace for the OpenRouter daily counters ONLY (global call ceiling +
+# per-IP daily sub-cap, server/_lib/kvLimit.js) — both need windows/global truth
+# the native ratelimits binding can't express. The per-minute per-IP abuse caps
+# live on the [[ratelimits]] bindings below (KV free tier allows only 1k
+# writes/day account-wide; a KV-backed counter costs 1 read + 1 write per
+# request, which capped the whole app at ~1k requests/day and let cheap
+# endpoints starve the ceiling's write budget).
 [[kv_namespaces]]
 binding = "KV"
 id = "d433017f16f94ee99612fb0c01aef3d7"
+
+# Per-IP abuse caps (server/_lib/ipLimit.js). Native rate-limiting bindings:
+# free, no KV ops, but per-colo/eventually-consistent — fine for per-IP caps
+# (one IP lands on one colo), NOT for global budgets (that's the RATE_LIMITER
+# DO / the KV daily ceiling). `period` only supports 10 or 60 (seconds);
+# `namespace_id` is an arbitrary account-unique integer string. Absent bindings
+# (plain Vite, unit tests) degrade open in the adapter.
+[[ratelimits]]
+name = "RL_MB"
+namespace_id = "1001"
+simple = { limit = 120, period = 60 }
+
+[[ratelimits]]
+name = "RL_DISCOGS"
+namespace_id = "1002"
+simple = { limit = 60, period = 60 }
+
+[[ratelimits]]
+name = "RL_CLOSURE"
+namespace_id = "1003"
+simple = { limit = 200, period = 60 }
+
+[[ratelimits]]
+name = "RL_FETCH_PAGE"
+namespace_id = "1004"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "RL_OPENROUTER"
+namespace_id = "1005"
+simple = { limit = 20, period = 60 }
 
 # D1 (SQLite) graph substrate for the lookup cache (Phase 2). Local dev uses a
 # filesystem-backed SQLite so the `database_id` here is a placeholder. Before

@@ -1,3 +1,12 @@
+// KV-counter limits — now used ONLY for the OpenRouter daily counters (the
+// per-IP daily sub-cap via checkRateLimit, and the global call ceiling below).
+// Every per-minute per-IP abuse cap moved to the native ratelimits bindings
+// (ipLimit.js): a KV counter costs 1 read + 1 write per request, and KV's free
+// tier (1k writes/day) both capped total traffic and let cheap endpoints
+// exhaust the write budget the daily ceiling depends on. The daily counters
+// stay here because they need what the native binding can't do: a 24h window
+// and one globally-consistent count. Denied checks don't write, and the global
+// ceiling bounds the writers, so the residual KV write volume is self-limiting.
 export async function checkRateLimit(env, { scope, ip, limit, windowSec, now = Date.now }) {
   if (!env?.KV) return { allowed: true, degraded: true };
   const windowStart = Math.floor(now() / 1000 / windowSec) * windowSec;

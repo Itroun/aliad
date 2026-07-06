@@ -1,5 +1,5 @@
 import { fetchWithRetry } from '../../src/core/fetchWithRetry.js';
-import { checkRateLimit } from '../_lib/kvLimit.js';
+import { checkIpLimit } from '../_lib/ipLimit.js';
 
 export { fetchWithRetry };
 
@@ -7,8 +7,7 @@ const MAX_RESPONSE_BYTES = 1_048_576;
 const CHALLENGE_SNIFF_BYTES = 16_384;
 const OVERALL_TIMEOUT_MS = 30_000;
 const READER_TIMEOUT_MS = 15_000;
-const RATE_LIMIT = 10;
-const RATE_WINDOW_SEC = 60;
+// Per-IP cap is 10/60s on the RL_FETCH_PAGE binding (wrangler.toml).
 const MAX_REDIRECTS = 5;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
@@ -93,12 +92,7 @@ export async function handle(context) {
   }
 
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  const rate = await checkRateLimit(env, {
-    scope: 'fetch-page',
-    ip,
-    limit: RATE_LIMIT,
-    windowSec: RATE_WINDOW_SEC,
-  });
+  const rate = await checkIpLimit(env, { binding: 'RL_FETCH_PAGE', ip });
   if (!rate.allowed) {
     return new Response('Too many requests', { status: 429 });
   }

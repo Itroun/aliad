@@ -15,7 +15,7 @@
 // Collab splitting ("X vs Y") stays client-side — the browser calls this endpoint
 // once per part + combo and merges the streams. This endpoint is single-root.
 
-import { checkRateLimit } from '../_lib/kvLimit.js';
+import { checkIpLimit } from '../_lib/ipLimit.js';
 import { makeD1Store } from '../_lib/quadStore.js';
 import { PRIORITY_ROOT, PRIORITY_EXPAND } from '../_lib/rateGate.js';
 import { handleLookup } from './lookup.js';
@@ -148,12 +148,12 @@ export async function handle(context) {
   const roots = url.searchParams.getAll('roots');
   if (roots.length === 0) roots.push(root);
 
-  // Per-IP cap. A full lineup run fires one closure request per act in parallel,
-  // and each closure fans out many handleLookup calls (which therefore skip their
-  // own per-call limit) — so the window is sized for a large lineup, not a single
-  // lookup. Pure abuse protection.
+  // Per-IP cap (200/60s, see wrangler.toml). A full lineup run fires one closure
+  // request per act in parallel, and each closure fans out many handleLookup
+  // calls (which therefore skip their own per-call limit) — so the window is
+  // sized for a large lineup, not a single lookup. Pure abuse protection.
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  const rate = await checkRateLimit(env, { scope: 'closure', limit: 200, windowSec: 60, ip });
+  const rate = await checkIpLimit(env, { binding: 'RL_CLOSURE', ip });
   if (!rate.allowed) return new Response('Too many requests', { status: 429 });
 
   const encoder = new TextEncoder();

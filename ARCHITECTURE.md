@@ -65,7 +65,8 @@ server/                  Cloudflare Workers app (not Pages)
 │   ├── openrouter.js    LLM proxy via OpenRouter (key injection, rate + daily-ceiling caps)
 │   └── fetch-page.js    URL fetch proxy (SSRF guard, challenge sniffing)
 ├── rateLimiter.js       RateLimiter Durable Object (global Discogs token bucket)
-└── _lib/                binding adapters: quadStore (D1), kvLimit (KV),
+└── _lib/                binding adapters: quadStore (D1), kvLimit (KV daily
+                         counters), ipLimit (native per-IP rate limits),
                          rateGate (DO), originCheck (origin allowlist)
 
 migrations/0001_create_graph.sql   D1 schema (lookups + quads + indexes)
@@ -200,6 +201,16 @@ Both lookups go through `/api/lookup`, which injects credentials server-side
   **best-effort** — the per-IP cap on `/api/lookup` is abuse protection, not MB's
   limit, so concurrent cold lookups can still stampede past 1/sec; we accept that
   (gating MB would serialise big cold runs into multi-minute crawls).
+- **Per-IP abuse caps** (all `/api/*` endpoints) run on native Workers
+  rate-limiting bindings (`[[ratelimits]]`, adapter `server/_lib/ipLimit.js`) —
+  free and KV-less, but per-colo/eventually-consistent, which is fine for per-IP
+  caps and disqualifying for global budgets. KV holds only the two OpenRouter
+  daily counters (global call ceiling + per-IP daily sub-cap): they need a 24h
+  window and one global truth. This split exists because a KV-counter limiter
+  (1 read + 1 write per request against a 1k-writes/day free tier) capped the
+  whole app at ~1k requests/day and let the cheap endpoints exhaust the write
+  budget the LLM spend ceiling depends on — every KV guard degrades open, so
+  budget exhaustion silently disarmed it.
 - **Discogs.** Requires a personal access token; 60 req/min authenticated as a
   **rolling window**. Enforced globally by the RateLimiter DO token bucket, sized
   to the invariant `capacity + refill/min ≤ 60` (5 + 54 = 59): a cold run drains

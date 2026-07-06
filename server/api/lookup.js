@@ -11,10 +11,11 @@
 // the blob is reconstituted from that lookup's quads. The returned JSON is
 // byte-identical to before — only the backing store changed — so the browser
 // walker and provider contract are untouched. This lays the shared, queryable
-// substrate for Phase 3 (server-side closure queries). KV stays, but now only
-// for rate limiting + the OpenRouter ceiling. See ARCHITECTURE.md.
+// substrate for Phase 3 (server-side closure queries). Per-IP abuse caps live
+// on the native ratelimits bindings (ipLimit.js); KV holds only the OpenRouter
+// daily counters. See ARCHITECTURE.md.
 
-import { checkRateLimit } from '../_lib/kvLimit.js';
+import { checkIpLimit } from '../_lib/ipLimit.js';
 import { awaitDiscogsSlot, PRIORITY_ROOT } from '../_lib/rateGate.js';
 import { makeD1Store } from '../_lib/quadStore.js';
 import { makeDumpStore } from '../_lib/dumpStore.js';
@@ -41,10 +42,11 @@ const TTL_EMPTY_SEC = 7 * DAY;
 
 const PROVIDERS = {
   musicbrainz: {
-    // Per-IP abuse cap, NOT MB's global 1/sec (can't be enforced per-IP; left
-    // best-effort to the client queue). One lineup run fans out many lookups
-    // via the identity-graph walk, so the window has generous headroom.
-    rateLimit: { scope: 'musicbrainz', limit: 120, windowSec: 60 },
+    // Per-IP abuse cap (120/60s, see wrangler.toml), NOT MB's global 1/sec
+    // (can't be enforced per-IP; left best-effort to the client queue). One
+    // lineup run fans out many lookups via the identity-graph walk, so the
+    // window has generous headroom.
+    ipLimitBinding: 'RL_MB',
     requiresToken: false,
     headers: () => ({ 'User-Agent': USER_AGENT, Accept: 'application/json' }),
     searchUrl: (name) =>
@@ -56,7 +58,7 @@ const PROVIDERS = {
     retry: { maxAttempts: 5, backoffMs: [1000, 3000, 7000, 15000] },
   },
   discogs: {
-    rateLimit: { scope: 'discogs', limit: 60, windowSec: 60 },
+    ipLimitBinding: 'RL_DISCOGS', // per-IP abuse cap 60/60s (wrangler.toml)
     // Gate upstream calls through the global RateLimiter DO. MB is left
     // best-effort (CLAUDE.md rate-limits note); only Discogs 429s in practice.
     gated: true,
@@ -332,7 +334,7 @@ export async function handle(context) {
   if (!cfg) return new Response('Unknown provider', { status: 400 });
 
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  const rate = await checkRateLimit(env, { ...cfg.rateLimit, ip });
+  const rate = await checkIpLimit(env, { binding: cfg.ipLimitBinding, ip });
   if (!rate.allowed) return new Response('Too many requests', { status: 429 });
 
   const { status, body, cache } = await handleLookup(env, {
