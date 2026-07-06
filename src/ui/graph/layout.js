@@ -310,7 +310,7 @@ function pointSegment(p, a, b) {
 // Finalize-only feature-aware de-collision. Box separation guarantees clusters'
 // bounding BOXES don't overlap, but a box is a loose container: a node of one
 // cluster can still sit on an EDGE of another that cuts diagonally through the
-// gap (the "Man With No Name on the Dado→Federico line" artifact). Here we look at
+// gap (the observed node-parked-on-a-foreign-diagonal-edge artifact). Here we look at
 // the real geometry — every node vs every FOREIGN cluster's edges — and push the
 // two clusters apart along the intrusion normal until each node clears foreign
 // edges by `clearance`. Deliberately NOT run during streaming (its finer-grained
