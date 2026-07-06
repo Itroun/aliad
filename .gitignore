@@ -4,3 +4,4 @@ dist
 .env.local
 .wrangler
 *.log
+discogs-dump.db*

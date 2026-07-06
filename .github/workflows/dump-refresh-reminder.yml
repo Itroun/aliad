@@ -1,0 +1,34 @@
+name: dump-refresh-reminder
+
+# Monthly nag to refresh the Discogs dump substrate (published ~1st of each
+# month; we check on the 5th). The refresh itself is deliberately manual —
+# this only opens a reminder issue. Skips if a dump-refresh issue is already
+# open, so an unresolved month doesn't stack duplicates.
+on:
+  schedule:
+    - cron: '0 8 5 * *' # 5th of every month, 08:00 UTC
+  workflow_dispatch: # manual test button
+
+permissions:
+  issues: write
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open reminder issue unless one is already open
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          open=$(gh issue list --label dump-refresh --state open --json number --jq length)
+          if [ "$open" -gt 0 ]; then
+            echo "An open dump-refresh issue already exists; skipping."
+            exit 0
+          fi
+          month=$(date -u +%Y%m)
+          gh issue create \
+            --title "Discogs dump refresh due ($month)" \
+            --label dump-refresh \
+            --assignee "${GITHUB_REPOSITORY_OWNER}" \
+            --body "$(printf 'The %s Discogs data dump should be published by now.\n\nTo refresh: open the repo in Claude Code and run `/dump-refresh` — it checks whether the new dump is actually out, builds and uploads it, rotates the read credentials, and verifies the result against production.\n\nClose this issue once the new dump is verified live (the skill does this as its last step).' "$month")"
