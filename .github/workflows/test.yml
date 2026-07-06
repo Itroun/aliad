@@ -2,8 +2,13 @@ name: test
 
 on:
   push:
-    branches: [main]
   pull_request:
+
+# A newer push to the same branch supersedes the queued/running check;
+# main keeps every run (deploy history should stay complete).
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   test:
