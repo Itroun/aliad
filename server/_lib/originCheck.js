@@ -12,8 +12,13 @@
 // create false positives against odd legit clients.
 //
 // Fails OPEN when ALLOWED_ORIGIN is unset, mirroring checkRateLimit's degraded
-// path: local `wrangler dev` and the tests run without the var, and the real
-// origin value is only known at deploy. MUST be set in production.
+// path. That covers the tests, but NOT local `wrangler dev`: ALLOWED_ORIGIN is a
+// wrangler.toml [vars] entry (so a redeploy can't forget it) and [vars] applies
+// in dev too. Worse, the `[[routes]] pattern = "aliad.app"` custom domain makes
+// dev present requests as arriving at that host over HTTP, so the Worker sees
+// `Origin: http://aliad.app` no matter what the browser sent — the https-only
+// allowlist then 403s every /api/* call. Local fix: append the http variant via
+// .dev.vars. curl masks the whole thing, since a header-less request is allowed.
 
 function normaliseOrigin(value) {
   if (!value) return null;
