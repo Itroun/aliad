@@ -230,6 +230,10 @@ async function runLineup(artists, signal, { urlUpdate = 'replace', view = 'graph
       if (signal.aborted) return;
       devProbe.note(`${artist} · expansion budget hit (${info.skipped} aliases not explored)`);
     },
+    onNameResolved: (artist, info) => {
+      if (signal.aborted) return;
+      devProbe.note(`${artist} · no source match, re-rooted onto "${info.to}"`);
+    },
   });
 
   if (signal.aborted) return;

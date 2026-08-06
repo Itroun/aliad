@@ -1,4 +1,5 @@
 import { dedupeNames, mergeResults } from './merge.js';
+import { splitBilling } from './lineupNames.js';
 
 // Phase 3b: the identity-graph walk runs SERVER-SIDE now. lookupAll no longer
 // touches providers or the L1 browser cache directly — for each lineup name it
@@ -11,23 +12,13 @@ import { dedupeNames, mergeResults } from './merge.js';
 // enqueueFromNode) and its per-provider rate-limit/cache machinery are gone —
 // the expansion rules now live solely in src/core/closure.js.
 
-// Festival lineups commonly use "X vs Y", "X b2b Y", "X & Y" for collab acts.
-// Providers don't know these combined names, so we look up the constituents
-// individually and merge their data + closures into the combo's entry.
-const COLLAB_SEPARATORS = [/\s+vs\.?\s+/i, /\s+b2b\s+/i, /\s+&\s+/];
-
+// The split rules themselves live in src/core/lineupNames.js, because the
+// closure endpoint needs them too (its re-root must not fire on a combo name
+// this module already split). `splitCollab` keeps returning bare parts — that's
+// what lookupAll and the graph builder consume; `splitBilling` carries the
+// collab-vs-alias tag for callers that need to render the distinction.
 export function splitCollab(name) {
-  const s = String(name ?? '').trim();
-  if (!s) return null;
-  for (const sep of COLLAB_SEPARATORS) {
-    if (!sep.test(s)) continue;
-    const parts = s
-      .split(sep)
-      .map((p) => p.trim())
-      .filter(Boolean);
-    if (parts.length >= 2) return parts;
-  }
-  return null;
+  return splitBilling(name)?.parts ?? null;
 }
 
 // Provider selection lives server-side now (the walk runs over /api/closure), so
@@ -81,7 +72,7 @@ export function lookupAll(names, callbacks = {}) {
 // from the terminal `done` event. `reportName` is the lineup row this stream's
 // progress should update (null for a collab part, whose name isn't a row).
 async function streamClosure(name, roots, callbacks, { reportName }) {
-  const { onProviderResult, onArtistDone, onBudgetExhausted, signal } = callbacks;
+  const { onProviderResult, onArtistDone, onBudgetExhausted, onNameResolved, signal } = callbacks;
 
   const params = new URLSearchParams();
   params.set('root', name);
@@ -117,6 +108,12 @@ async function streamClosure(name, roots, callbacks, { reportName }) {
         break;
       case 'budget':
         onBudgetExhausted?.(name, data);
+        break;
+      case 'resolved':
+        // The endpoint re-rooted this stream onto a base name. The lineup row
+        // keeps the billed name — that's what's on the poster — so this is
+        // diagnostic only.
+        onNameResolved?.(name, data);
         break;
       case 'done':
         result = data;

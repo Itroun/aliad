@@ -173,6 +173,26 @@ These compose cleanly and everything else leans on them:
   the graph filling as data arrives; the UI never waits on the slowest node.
 - **Collab splitting stays client-side.** `/api/closure` is single-root by design;
   `lookupAll` owns the "X vs Y" split and stream-merge.
+- **Billed name → source name, in two shapes** (`src/core/lineupNames.js`, the one
+  home for both so the server re-root knows what the client already split). Every
+  match in the pipeline is exact on `normaliseName`, so a billing the sources don't
+  carry resolves to nothing.
+  A _split_ names two identities: `splitBilling` returns the parts plus a **kind** —
+  `collab` ("X vs Y", "X ft. Y") or `alias` ("X aka Y", "X presents Y"). The kind
+  matters because an alias billing is one artist, so `nodeKind` must not give it the
+  collaboration glyph or announce it as one.
+  A _substitution_ ("X in Dub", "X Live") names one, and `/api/closure` re-roots the
+  walk onto the base name. Four conditions gate it, each guarding a wrong answer:
+  the billed name returned nothing (so "Synergy Dub" is never second-guessed); the
+  root lookups **succeeded** (an error also looks empty, and re-rooting off a 503
+  substitutes a different artist *and* masks the failure); the billing isn't a combo
+  (empty by design — the client walks its parts); and this row owns the base name,
+  meaning no other row is billed as it and no earlier row strips to it. The
+  re-rooted lookup moves to the root gate tier.
+  A trailing parenthetical is deliberately **not** split: festival billings use that
+  slot for origin ("Nu Zau (RO)", "DJ Bone (Detroit)") far more than for a second
+  identity, and short place tokens are themselves real artists, so splitting merged
+  an unrelated act onto the row.
 - **Bindings sit behind adapters** (`server/_lib/*`). The only Cloudflare-specific
   surface is KV, D1, and the RateLimiter DO — each behind one small module — so the
   WinterCG-standard `fetch()` handler stays portable.

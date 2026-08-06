@@ -22,6 +22,12 @@ import { handleLookup } from './lookup.js';
 import { quadsToResult } from '../../src/core/quads.js';
 import { mergeResults, normaliseName } from '../../src/core/merge.js';
 import { identityClosure } from '../../src/core/closure.js';
+import { isEmptyResult } from '../../src/providers/provider.js';
+import {
+  reRootOwner,
+  splitBilling,
+  stripPerformanceQualifier,
+} from '../../src/core/lineupNames.js';
 
 // The providers the walk consults per node. Mirrors the PROVIDERS map in
 // functions/api/lookup.js (which is not exported); keep the two in sync.
@@ -53,7 +59,11 @@ export async function runClosure(
   }
 
   const rootKeys = new Set(roots.map(normaliseName).filter(Boolean));
-  const rootKey = normaliseName(root);
+  // Mutable: a billed name the sources don't carry ("X in Dub") re-roots the
+  // walk onto its base name below, and `neighbors` reads this for the rate-gate
+  // tier — a fallback root that stayed on the expand tier would queue behind
+  // every other stream's deep walk despite being headline data.
+  let rootKey = normaliseName(root);
   const rootOutcomes = {};
 
   const neighbors = async (name) => {
@@ -121,12 +131,51 @@ export async function runClosure(
     return mergeResults(quadsToResult(key, await graph.getQuadsTouching(key)));
   };
 
-  const { merged, closure } = await identityClosure(root, {
-    neighbors,
-    rootKeys,
-    onNode: (m) => emit('progress', { merged: m }),
-    onBudgetExhausted: (info) => emit('budget', info),
-  });
+  const walk = (name) =>
+    identityClosure(name, {
+      neighbors,
+      rootKeys,
+      onNode: (m) => emit('progress', { merged: m }),
+      onBudgetExhausted: (info) => emit('budget', info),
+    });
+
+  let { merged, closure } = await walk(root);
+
+  // Performance-mode fallback. Only on a total miss, so a name the sources DO
+  // carry is never second-guessed — "Youth in Dub" and "Synergy Dub" resolve
+  // directly and never reach this. Retrying the whole walk (rather than probing
+  // first) costs nothing extra: the failed walk is one node with no edges, and
+  // that lookup is what tells us it missed.
+  //
+  // "Missed" must mean the upstream ANSWERED and didn't know the name. `neighbors`
+  // swallows lookup errors and returns empty quads, so an empty result also covers
+  // a 503/timeout — re-rooting on that would substitute a different artist because
+  // of a transient failure, and the second walk overwrites rootOutcomes, so `done`
+  // would report no error at all. Require every provider to have succeeded.
+  const rootLookupsOk = PROVIDER_NAMES.every((p) => rootOutcomes[p] === true);
+  // A combo billing ("X vs Y", "X presents Y") is empty BY DESIGN — the client
+  // splits it and walks the parts, so the combo stream resolving to nothing is
+  // the expected path, not a miss. Stripping a qualifier off it just yields
+  // another name no source carries, at the cost of a root-tier Discogs token.
+  const isCombo = splitBilling(root) !== null;
+  const base =
+    rootLookupsOk && !isCombo && isEmptyResult(merged) ? stripPerformanceQualifier(root) : null;
+  const baseKey = base ? normaliseName(base) : '';
+  if (
+    baseKey &&
+    baseKey !== rootKey &&
+    // Another lineup row is billed under this name already — it renders the
+    // cluster, and two streams sharing an ownRootKey would duplicate it.
+    !rootKeys.has(baseKey) &&
+    // …and when two rows strip to the SAME base ("X in Dub" + "X Live"), only
+    // the first of them re-roots, for the same reason. Streams can't see each
+    // other, so ownership is derived from the shared roots list.
+    reRootOwner(roots, baseKey, normaliseName) === root
+  ) {
+    rootKey = baseKey; // re-tier: the fallback lookup IS this stream's root
+    emit('resolved', { from: root, to: base });
+    ({ merged, closure } = await walk(base));
+  }
 
   const queried = PROVIDER_NAMES.filter((p) => rootOutcomes[p] === true);
   const errored = PROVIDER_NAMES.filter((p) => rootOutcomes[p] === false);

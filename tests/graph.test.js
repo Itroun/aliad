@@ -23,7 +23,20 @@ function entry(name, { aliases = [], members = [], groups = [], relatedProjects 
 
 describe('nodeKind', () => {
   it('classifies a split collab ("X vs Y") as collab', () => {
-    expect(nodeKind({ parts: ['X', 'Y'], merged: { members: [{ name: 'A' }] } })).toBe('collab');
+    expect(
+      nodeKind({ name: 'X vs Y', parts: ['X', 'Y'], merged: { members: [{ name: 'A' }] } }),
+    ).toBe('collab');
+  });
+
+  it('does not call an alias billing a collaboration', () => {
+    // One artist under two names — the split is right, the label would not be.
+    expect(
+      nodeKind({
+        name: 'Robert Leiner aka The Source Experience',
+        parts: ['Robert Leiner', 'The Source Experience'],
+        merged: { members: [] },
+      }),
+    ).toBe('person');
   });
 
   it('classifies an act with members as a group', () => {

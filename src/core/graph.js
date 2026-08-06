@@ -1,4 +1,5 @@
 import { normaliseName } from './merge.js';
+import { splitBilling } from './lineupNames.js';
 
 // Turn a per-artist lookup result set into the graph shape the UI renders:
 //   { clusters: [{ id, nodes, edges }], singletons: [...] }
@@ -350,8 +351,15 @@ function buildEdge(A, B, clusterNodeKeys = new Set()) {
 // Each lineup act is one of three entity kinds, surfaced as a node style in the
 // map view. A combo ("X vs Y") split into parts is a collaboration; an act that
 // MusicBrainz lists members for is a band/group; anything else is a solo person.
+//
+// Having parts is NOT enough to mean collaboration: an alias billing ("X aka Y")
+// also splits in two, but it's one artist under two names — rendering it with
+// the collab glyph, and announcing "collaboration" to a screen reader, would
+// state something untrue about the act. Re-read the billing to tell them apart.
 export function nodeKind(entry) {
-  if ((entry?.parts?.length ?? 0) >= 2) return 'collab';
+  if ((entry?.parts?.length ?? 0) >= 2 && splitBilling(entry?.name)?.kind !== 'alias') {
+    return 'collab';
+  }
   if ((entry?.merged?.members?.length ?? 0) > 0) return 'group';
   return 'person';
 }

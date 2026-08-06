@@ -179,6 +179,37 @@ describe('splitCollab', () => {
     expect(splitCollab('Drop & Dash vs Germinator')).toEqual(['Drop & Dash', 'Germinator']);
   });
 
+  it('splits the alias/appositive billings that name two identities', () => {
+    expect(splitCollab('Robert Leiner aka The Source Experience')).toEqual([
+      'Robert Leiner',
+      'The Source Experience',
+    ]);
+    expect(splitCollab('Mathew Jonson presents Freedom Engine Live')).toEqual([
+      'Mathew Jonson',
+      'Freedom Engine Live',
+    ]);
+    expect(splitCollab('David Maurette ft. Irina Mikhailova')).toEqual([
+      'David Maurette',
+      'Irina Mikhailova',
+    ]);
+    expect(splitCollab('A feat B')).toEqual(['A', 'B']);
+  });
+
+  it('never splits a trailing parenthetical', () => {
+    // Festival billings use that slot for origin far more often than for a
+    // second identity, and short place tokens are themselves real artists —
+    // splitting merged an unrelated act onto the row. See lineupNames.js.
+    expect(splitCollab('Nu Zau (RO)')).toBe(null);
+    expect(splitCollab('DJ Bone (Detroit)')).toBe(null);
+    expect(splitCollab('Ree.K (2)')).toBe(null);
+    expect(splitCollab('Andrew Sigil (dj set)')).toBe(null);
+    expect(splitCollab('Benji Vaughan (Prometheus)')).toBe(null);
+  });
+
+  it('does not split on " by " (too many real names contain it)', () => {
+    expect(splitCollab('The Infinity Project by Graham Wood')).toBe(null);
+  });
+
   it('returns null for non-collab names', () => {
     expect(splitCollab('Infected Mushroom')).toBe(null);
     expect(splitCollab('')).toBe(null);

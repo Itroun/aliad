@@ -252,6 +252,171 @@ describe('runClosure (SSE endpoint core)', () => {
     expect(lookedUp).toEqual(['Solo Artist']);
   });
 
+  it('re-roots onto the base name when a performance-mode billing resolves to nothing', async () => {
+    const store = fakeStore();
+    // The billed name is absent from the sources; the base name is not.
+    await seedHit(store, 'discogs', 'Etnica', { ...empty, members: [{ name: 'Max Lanfranconi' }] });
+
+    const cap = capture();
+    await runClosure(env, {
+      root: 'Etnica in DUB',
+      roots: ['Etnica in DUB'],
+      store,
+      now: () => 1,
+      fetchFn: benignFetch(),
+      emit: cap.emit,
+    });
+
+    expect(cap.of('resolved')).toEqual([{ from: 'Etnica in DUB', to: 'Etnica' }]);
+    const [done] = cap.of('done');
+    expect(done.merged.members.map((m) => m.name)).toContain('Max Lanfranconi');
+    expect(done.closure).toContain('etnica');
+  });
+
+  it('does not re-root when the billed name resolves', async () => {
+    const store = fakeStore();
+    // A real artist whose name ends in a qualifier word. The rule must not fire.
+    await seedHit(store, 'discogs', 'Synergy Dub', {
+      ...empty,
+      members: [{ name: 'Some Person' }],
+    });
+
+    const cap = capture();
+    await runClosure(env, {
+      root: 'Synergy Dub',
+      roots: ['Synergy Dub'],
+      store,
+      now: () => 1,
+      fetchFn: benignFetch(),
+      emit: cap.emit,
+    });
+
+    expect(cap.of('resolved')).toHaveLength(0);
+    expect(cap.of('done')[0].merged.members.map((m) => m.name)).toContain('Some Person');
+  });
+
+  it('skips the re-root when another lineup row already owns the base name', async () => {
+    const store = fakeStore();
+    await seedHit(store, 'discogs', 'Etnica', { ...empty, members: [{ name: 'Max Lanfranconi' }] });
+
+    const cap = capture();
+    await runClosure(env, {
+      root: 'Etnica in DUB',
+      // "Etnica" is billed on its own elsewhere in the lineup — it renders the
+      // cluster, and two streams sharing an ownRootKey would duplicate it.
+      roots: ['Etnica in DUB', 'Etnica'],
+      store,
+      now: () => 1,
+      fetchFn: benignFetch(),
+      emit: cap.emit,
+    });
+
+    expect(cap.of('resolved')).toHaveLength(0);
+    expect(isEmpty(cap.of('done')[0].merged)).toBe(true);
+  });
+
+  it('does not re-root when the root lookup ERRORED rather than missed', async () => {
+    const store = fakeStore();
+    await seedHit(store, 'discogs', 'Etnica', { ...empty, members: [{ name: 'Max Lanfranconi' }] });
+    // The billed name's lookup fails at the wire. An empty result here means
+    // "we don't know", not "absent" — substituting a different artist off a
+    // transient 503 would be a confident wrong answer.
+    const fetchFn = async (url) => {
+      if (url.includes('/database/search')) throw new Error('upstream down');
+      throw new Error(`unexpected fetch: ${url}`);
+    };
+
+    const cap = capture();
+    await runClosure(env, {
+      root: 'Etnica in DUB',
+      roots: ['Etnica in DUB'],
+      store,
+      now: () => 1,
+      fetchFn,
+      emit: cap.emit,
+    });
+
+    expect(cap.of('resolved')).toHaveLength(0);
+    // …and the failure is still reported rather than masked by a second walk.
+    expect(cap.of('done')[0].errored).toContain('discogs');
+  });
+
+  it('does not re-root a combo billing the client already split', async () => {
+    const store = fakeStore();
+    const cap = capture();
+    // The combo name resolves empty by design — lookupAll walks the parts. The
+    // qualifier strip would otherwise burn a root-tier token on a nonsense name.
+    await runClosure(env, {
+      root: 'Mathew Jonson presents Freedom Engine Live',
+      roots: ['Mathew Jonson presents Freedom Engine Live'],
+      store,
+      now: () => 1,
+      fetchFn: benignFetch(),
+      emit: cap.emit,
+    });
+
+    expect(cap.of('resolved')).toHaveLength(0);
+    expect(cap.of('provider').map((p) => p.name)).toEqual([
+      'Mathew Jonson presents Freedom Engine Live',
+    ]);
+  });
+
+  it('lets only the first of two rows sharing a base name re-root', async () => {
+    const store = fakeStore();
+    await seedHit(store, 'discogs', 'Etnica', { ...empty, members: [{ name: 'Max Lanfranconi' }] });
+    const roots = ['Etnica in DUB', 'Etnica Live'];
+
+    const first = capture();
+    await runClosure(env, {
+      root: 'Etnica in DUB',
+      roots,
+      store,
+      now: () => 1,
+      fetchFn: benignFetch(),
+      emit: first.emit,
+    });
+    const second = capture();
+    await runClosure(env, {
+      root: 'Etnica Live',
+      roots,
+      store,
+      now: () => 1,
+      fetchFn: benignFetch(),
+      emit: second.emit,
+    });
+
+    // Both re-rooting would render the same artist as two nodes and draw an
+    // edge between them.
+    expect(first.of('resolved')).toHaveLength(1);
+    expect(second.of('resolved')).toHaveLength(0);
+  });
+
+  it('gives the re-rooted lookup root-tier gate priority, not expand', async () => {
+    const store = fakeStore();
+    const ns = fakeRateLimiterNs([{ granted: true }]);
+    // Both the billed name and the base name are cold, so each takes a token
+    // and the tier is recorded per wire attempt. No walkable edges, so the
+    // only gated calls are the two roots.
+    const cap = capture();
+    await runClosure(
+      { DISCOGS_TOKEN: 'tok', RATE_LIMITER: ns },
+      {
+        root: 'Etnica in DUB',
+        roots: ['Etnica in DUB'],
+        store,
+        now: () => 1,
+        fetchFn: benignFetch(),
+        emit: cap.emit,
+      },
+    );
+
+    expect(cap.of('resolved')).toEqual([{ from: 'Etnica in DUB', to: 'Etnica' }]);
+    const tiers = ns.urls.map((u) => new URL(u).searchParams.get('priority'));
+    // The base-name lookup is this stream's root now: it must not queue behind
+    // other streams' deep walks on the expand tier.
+    expect(tiers).toEqual(['root', 'root']);
+  });
+
   it('emits an error event when no graph substrate is available', async () => {
     const cap = capture();
     await runClosure({}, { root: 'X', roots: ['X'], emit: cap.emit });
