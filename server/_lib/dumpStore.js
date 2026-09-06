@@ -4,8 +4,12 @@
 // tests inject a fake fetch returning captured pipeline JSON, mirroring how
 // fakeKV / the in-memory quad store stand in for their bindings.
 //
-// `makeDumpStore(env, { fetchFn })` returns `null` when TURSO_DUMP_URL/TOKEN are
+// `makeDumpStore(env, { fetchFn })` returns `null` when the dump credentials are
 // unbound — that's the degrade-open path: no dump, fall back to the gated wire.
+// Credentials arrive as ONE secret, `TURSO_DUMP` = {"url","token"}, so a monthly
+// refresh repoints host and token in a single atomic `wrangler secret put`; with
+// two secrets the gap between the two puts served a mismatched pair. The legacy
+// TURSO_DUMP_URL/TURSO_DUMP_TOKEN pair is still read as a fallback.
 //
 // `getArtist(normName, { signal })` runs ONE POST carrying two statements —
 // presence (is this name in the dump at all?) and its identity edges — and
@@ -24,10 +28,28 @@ const EDGES_SQL =
   'SELECT kind, other_id, other_name FROM dump_edges ' +
   'WHERE artist_id = (SELECT artist_id FROM dump_names WHERE norm_name = ?)';
 
-export function makeDumpStore(env, { fetchFn = fetch } = {}) {
-  const base = env?.TURSO_DUMP_URL;
+// A malformed TURSO_DUMP degrades open like an absent one: a broken dump costs
+// speed (the wire path still answers), and throwing here would fail lookups
+// outright.
+export function readDumpCreds(env) {
+  const raw = env?.TURSO_DUMP;
+  if (raw) {
+    const parsed = typeof raw === 'string' ? safeJson(raw) : raw;
+    const url = parsed?.url;
+    const token = parsed?.token;
+    if (url && token) return { url: String(url), token: String(token) };
+    return null;
+  }
+  const url = env?.TURSO_DUMP_URL;
   const token = env?.TURSO_DUMP_TOKEN;
-  if (!base || !token) return null;
+  if (url && token) return { url: String(url), token: String(token) };
+  return null;
+}
+
+export function makeDumpStore(env, { fetchFn = fetch } = {}) {
+  const creds = readDumpCreds(env);
+  if (!creds) return null;
+  const { url: base, token } = creds;
   const endpoint = `${String(base).replace(/\/$/, '')}/v2/pipeline`;
 
   return {
@@ -73,6 +95,14 @@ export function makeDumpStore(env, { fetchFn = fetch } = {}) {
       return details;
     },
   };
+}
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 function textArg(value) {

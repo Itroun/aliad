@@ -32,6 +32,35 @@ describe('makeDumpStore', () => {
     expect(makeDumpStore({ TURSO_DUMP_TOKEN: 'x' })).toBeNull();
   });
 
+  // Credentials ship as one secret so a monthly cutover repoints host and token
+  // atomically; the legacy pair stays readable so the rotation isn't a flag day.
+  it('reads url and token from the bundled TURSO_DUMP secret', async () => {
+    const fetchFn = fetchReturning(pipeline([], []));
+    const store = makeDumpStore(
+      { TURSO_DUMP: JSON.stringify({ url: 'https://new-host.turso.io', token: 'ro-new' }) },
+      { fetchFn },
+    );
+    await store.getArtist('someone');
+    const [endpoint, init] = fetchFn.mock.calls[0];
+    expect(endpoint).toBe('https://new-host.turso.io/v2/pipeline');
+    expect(init.headers.Authorization).toBe('Bearer ro-new');
+  });
+
+  it('prefers the bundled secret over the legacy pair', async () => {
+    const fetchFn = fetchReturning(pipeline([], []));
+    const store = makeDumpStore(
+      { ...ENV, TURSO_DUMP: JSON.stringify({ url: 'https://new-host.turso.io', token: 'ro-new' }) },
+      { fetchFn },
+    );
+    await store.getArtist('someone');
+    expect(fetchFn.mock.calls[0][0]).toBe('https://new-host.turso.io/v2/pipeline');
+  });
+
+  it('degrades open on a malformed or half-filled bundled secret', () => {
+    expect(makeDumpStore({ TURSO_DUMP: 'not json' })).toBeNull();
+    expect(makeDumpStore({ TURSO_DUMP: JSON.stringify({ url: 'https://h' }) })).toBeNull();
+  });
+
   it('maps a hit with edges into a Discogs details shape, grouped by kind', async () => {
     const fetchFn = fetchReturning(
       pipeline(

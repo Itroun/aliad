@@ -120,8 +120,11 @@ doesn't know).
   `src/` functions, so keys match exactly). `scripts/dump/resolveWinner.js` picks
   one deterministic winner per name: primary name > namevariation → unsuffixed >
   `(N)`-suffixed → more edges > fewer → lowest artist id. Pure and unit-tested.
-- **Degrade-open invariant.** `TURSO_DUMP_URL`/`TURSO_DUMP_TOKEN` unbound →
-  `makeDumpStore` returns null; Turso unreachable → `getArtist` throws. Either way
+- **Degrade-open invariant.** Dump credentials unbound → `makeDumpStore` returns
+  null; Turso unreachable → `getArtist` throws. Credentials are one secret,
+  `TURSO_DUMP` = `{"url","token"}` (the legacy `TURSO_DUMP_URL`/`TURSO_DUMP_TOKEN`
+  pair is still read as a fallback), so a monthly refresh repoints host and token
+  in a single atomic write; a malformed secret degrades open like an absent one. Either way
   the lookup falls through to today's gated search+details path. The rate gate,
   HIT/MISS/STALE, TTLs, quad writes, and stale-on-error are all untouched — the gate
   simply idles when the dump answers. A dump hit still writes quads, so the next
