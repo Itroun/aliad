@@ -86,7 +86,10 @@ async function main() {
   );
 
   log('\n✓ done. Cut over with ONE secret (url + token together):\n');
-  console.log(`TURSO_DUMP=${JSON.stringify({ url: dumpUrl, token: workerToken })}`);
+  // Single-quoted: the value is JSON, so an unquoted line makes .dev.vars
+  // unsourceable by the shell (`set -a; . ./.dev.vars` tries to run the braces).
+  // readDevVar and wrangler both strip the surrounding quotes.
+  console.log(`TURSO_DUMP='${JSON.stringify({ url: dumpUrl, token: workerToken })}'`);
   log(
     `\nProd: npx wrangler secret put TURSO_DUMP` +
       `\nThe previous month's database is left in place as a rollback target;` +

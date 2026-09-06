@@ -34,7 +34,11 @@ const EDGES_SQL =
 export function readDumpCreds(env) {
   const raw = env?.TURSO_DUMP;
   if (raw) {
-    const parsed = typeof raw === 'string' ? safeJson(raw) : raw;
+    // Tolerate surrounding quotes: the value is copied from upload.js output
+    // (single-quoted so .dev.vars stays shell-sourceable) into `wrangler secret
+    // put`, which takes it literally. Failing on that would black out the dump
+    // silently — a slow app with nothing in the logs.
+    const parsed = typeof raw === 'string' ? safeJson(unquote(raw)) : raw;
     const url = parsed?.url;
     const token = parsed?.token;
     if (url && token) return { url: String(url), token: String(token) };
@@ -95,6 +99,12 @@ export function makeDumpStore(env, { fetchFn = fetch } = {}) {
       return details;
     },
   };
+}
+
+function unquote(text) {
+  const t = String(text).trim();
+  const quoted = t.length >= 2 && (t[0] === '"' || t[0] === "'") && t.at(-1) === t[0];
+  return quoted ? t.slice(1, -1) : t;
 }
 
 function safeJson(text) {
